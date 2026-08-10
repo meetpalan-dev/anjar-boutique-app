@@ -34,11 +34,14 @@ jobs:
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
-              afterEvaluate {
-                  extensions.findByName("android")?.let { ext ->
-                      if (ext is com.android.build.gradle.BaseExtension) {
-                          ext.compileSdkVersion(36)
-                      }
+              plugins.withId("com.android.application") {
+                  extensions.configure<com.android.build.gradle.BaseExtension> {
+                      compileSdkVersion(36)
+                  }
+              }
+              plugins.withId("com.android.library") {
+                  extensions.configure<com.android.build.gradle.BaseExtension> {
+                      compileSdkVersion(36)
                   }
               }
           }
@@ -57,4 +60,3 @@ jobs:
         with:
           name: anjar-boutique-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          
