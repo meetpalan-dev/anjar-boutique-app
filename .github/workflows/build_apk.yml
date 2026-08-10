@@ -31,23 +31,22 @@ jobs:
 
       - name: Force compileSdk 36 for all plugin subprojects
         run: |
-          cat >> android/build.gradle.kts << 'EOF'
-
+          cat > android/compileSdkOverride.gradle << 'EOF'
           subprojects {
-              plugins.withId("com.android.application") {
-                  extensions.configure<com.android.build.gradle.BaseExtension> {
-                      compileSdkVersion(36)
-                  }
-              }
-              plugins.withId("com.android.library") {
-                  extensions.configure<com.android.build.gradle.BaseExtension> {
-                      compileSdkVersion(36)
+              afterEvaluate { proj ->
+                  if (proj.hasProperty('android')) {
+                      proj.android {
+                          compileSdkVersion 36
+                      }
                   }
               }
           }
           EOF
+          echo 'apply(from = "compileSdkOverride.gradle")' >> android/build.gradle.kts
           echo "----- root build.gradle.kts after edit -----"
           cat android/build.gradle.kts
+          echo "----- compileSdkOverride.gradle -----"
+          cat android/compileSdkOverride.gradle
 
       - name: Install dependencies
         run: flutter pub get
