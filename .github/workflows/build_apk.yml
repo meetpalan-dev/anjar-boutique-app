@@ -29,6 +29,23 @@ jobs:
           echo "----- build.gradle.kts after edit -----"
           cat android/app/build.gradle.kts
 
+      - name: Force compileSdk 36 for all plugin subprojects
+        run: |
+          cat >> android/build.gradle.kts << 'EOF'
+
+          subprojects {
+              afterEvaluate {
+                  extensions.findByName("android")?.let { ext ->
+                      if (ext is com.android.build.gradle.BaseExtension) {
+                          ext.compileSdkVersion(36)
+                      }
+                  }
+              }
+          }
+          EOF
+          echo "----- root build.gradle.kts after edit -----"
+          cat android/build.gradle.kts
+
       - name: Install dependencies
         run: flutter pub get
 
