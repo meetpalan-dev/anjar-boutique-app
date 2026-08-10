@@ -11,9 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Download background-removal model
+        run: |
+          mkdir -p assets/models
+          curl -L -o assets/models/u2net.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx
+
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
           channel: 'stable'
 
       - name: Scaffold Android platform files

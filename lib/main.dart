@@ -6,6 +6,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:image/image.dart' as img;
+import 'bg_removal.dart';
+import 'touchup_screen.dart';
 
 void main() {
   runApp(const AnjarBoutiqueApp());
@@ -54,7 +56,7 @@ class HomeScreen extends StatelessWidget {
     if (!context.mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => CompositeScreen(photoFile: File(picked.path))),
+      MaterialPageRoute(builder: (_) => BgRemovalScreen(photoFile: File(picked.path))),
     );
   }
 
@@ -98,11 +100,98 @@ class HomeScreen extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// COMPOSITE SCREEN — overlays the picked photo onto the branded template
+// BACKGROUND REMOVAL SCREEN — runs the on-device model, then hands off to
+// the touch-up brush before compositing onto the template.
+// ---------------------------------------------------------------------------
+class BgRemovalScreen extends StatefulWidget {
+  final File photoFile;
+  const BgRemovalScreen({super.key, required this.photoFile});
+
+  @override
+  State<BgRemovalScreen> createState() => _BgRemovalScreenState();
+}
+
+class _BgRemovalScreenState extends State<BgRemovalScreen> {
+  String? _error;
+
+  // Cap the working resolution so the model + brush stay fast. The final
+  // post is already a fixed-size template, so this loses no real quality.
+  static const int _maxWorkingDimension = 1400;
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    try {
+      final bytes = await widget.photoFile.readAsBytes();
+      var photo = img.decodeImage(bytes)!;
+
+      if (photo.width > _maxWorkingDimension || photo.height > _maxWorkingDimension) {
+        final scale = photo.width > photo.height
+            ? _maxWorkingDimension / photo.width
+            : _maxWorkingDimension / photo.height;
+        photo = img.copyResize(
+          photo,
+          width: (photo.width * scale).round(),
+          height: (photo.height * scale).round(),
+          interpolation: img.Interpolation.average,
+        );
+      }
+
+      final cutout = await BackgroundRemover.cutout(photo);
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => TouchUpScreen(
+            cutout: cutout,
+            onDone: (edited) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => CompositeScreen(cutout: edited)),
+              );
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Removing Background')),
+      body: Center(
+        child: _error != null
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Something went wrong: $_error', textAlign: TextAlign.center),
+              )
+            : const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Finding the product in your photo…'),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// COMPOSITE SCREEN — overlays the cut-out product onto the branded template
 // ---------------------------------------------------------------------------
 class CompositeScreen extends StatefulWidget {
-  final File photoFile;
-  const CompositeScreen({super.key, required this.photoFile});
+  final img.Image cutout;
+  const CompositeScreen({super.key, required this.cutout});
 
   @override
   State<CompositeScreen> createState() => _CompositeScreenState();
@@ -120,7 +209,7 @@ class _CompositeScreenState extends State<CompositeScreen> {
 
   Future<void> _runComposite() async {
     try {
-      final result = await compositeOntoTemplate(widget.photoFile);
+      final result = await compositeOntoTemplate(widget.cutout);
       setState(() => _composited = result);
     } catch (e) {
       setState(() => _error = e.toString());
@@ -169,15 +258,12 @@ class _CompositeScreenState extends State<CompositeScreen> {
   }
 }
 
-/// Loads the bundled background template and pastes the user's photo on top,
-/// scaled to fit CompositeConfig's box (preserving aspect ratio, centered),
-/// leaving the mandala + logo visible around it.
-Future<Uint8List> compositeOntoTemplate(File photoFile) async {
+/// Loads the bundled background template and pastes the (already background-
+/// removed) cutout on top, scaled to fit CompositeConfig's box (preserving
+/// aspect ratio, centered). Transparent pixels let the mandala show through.
+Future<Uint8List> compositeOntoTemplate(img.Image photo) async {
   final templateBytes = await rootBundle.load('assets/background_template.png');
   final template = img.decodePng(templateBytes.buffer.asUint8List())!;
-
-  final photoBytes = await photoFile.readAsBytes();
-  final photo = img.decodeImage(photoBytes)!;
 
   // Scale photo to fit inside the configured box, preserving aspect ratio.
   final boxW = CompositeConfig.boxWidth;
