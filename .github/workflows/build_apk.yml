@@ -23,8 +23,11 @@ jobs:
       - name: Scaffold Android platform files
         run: flutter create . --platforms=android --org com.anjarboutique --project-name anjar_boutique_bot
 
-      - name: Override compileSdk
-        run: echo "flutter.compileSdkVersion=36" >> android/local.properties
+      - name: Bump Android compileSdk
+        run: |
+          sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+          echo "----- build.gradle.kts after edit -----"
+          cat android/app/build.gradle.kts
 
       - name: Install dependencies
         run: flutter pub get
@@ -37,3 +40,4 @@ jobs:
         with:
           name: anjar-boutique-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          
