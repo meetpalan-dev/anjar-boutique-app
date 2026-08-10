@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:image/image.dart' as img;
 import 'bg_removal.dart';
 import 'touchup_screen.dart';
+import 'cutout_review_screen.dart';
 
 void main() {
   runApp(const AnjarBoutiqueApp());
@@ -147,9 +148,9 @@ class _BgRemovalScreenState extends State<BgRemovalScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => TouchUpScreen(
+          builder: (_) => CutoutReviewScreen(
             cutout: cutout,
-            onDone: (edited) {
+            onConfirmed: (edited) {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => CompositeScreen(cutout: edited)),
@@ -297,20 +298,41 @@ class DetailsFormScreen extends StatefulWidget {
 class _DetailsFormScreenState extends State<DetailsFormScreen> {
   final descriptionCtrl = TextEditingController();
   final productNameCtrl = TextEditingController();
-  final sizeCtrl = TextEditingController();
+  final sizeExtraCtrl = TextEditingController();
   final stitchingCtrl = TextEditingController();
   final fabricCtrl = TextEditingController();
   final workCtrl = TextEditingController();
+  final colorExtraCtrl = TextEditingController();
   final extraCtrl = TextEditingController();
+
+  bool _sizeIsInches = true;
+  final Set<String> _selectedInchSizes = {};
+  final Set<String> _selectedStandardSizes = {};
+  final Set<String> _selectedColors = {};
+
+  static const List<String> _inchSizes = ['26', '28', '30', '32', '34', '36', '38', '40'];
+  static const List<String> _standardSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL', 'XXXXXL'];
+  static const Map<String, String> _colorEmojis = {
+    'Red': '🔴',
+    'Orange': '🟠',
+    'Yellow': '🟡',
+    'Green': '🟢',
+    'Blue': '🔵',
+    'Purple': '🟣',
+    'Brown': '🟤',
+    'Black': '⚫',
+    'White': '⚪',
+  };
 
   @override
   void dispose() {
     descriptionCtrl.dispose();
     productNameCtrl.dispose();
-    sizeCtrl.dispose();
+    sizeExtraCtrl.dispose();
     stitchingCtrl.dispose();
     fabricCtrl.dispose();
     workCtrl.dispose();
+    colorExtraCtrl.dispose();
     extraCtrl.dispose();
     super.dispose();
   }
@@ -329,13 +351,34 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     );
   }
 
+  Widget _sectionLabel(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
+      );
+
+  String get _computedSize {
+    final chosen = _sizeIsInches ? _selectedInchSizes : _selectedStandardSizes;
+    final parts = <String>[...chosen];
+    if (sizeExtraCtrl.text.trim().isNotEmpty) parts.add(sizeExtraCtrl.text.trim());
+    return parts.join(', ');
+  }
+
+  String get _computedColor {
+    final parts = <String>[
+      for (final c in _selectedColors) '${_colorEmojis[c]} $c',
+    ];
+    if (colorExtraCtrl.text.trim().isNotEmpty) parts.add(colorExtraCtrl.text.trim());
+    return parts.join(', ');
+  }
+
   void _generate() {
     final caption = buildCaption(
       description: descriptionCtrl.text.trim(),
       productName: productNameCtrl.text.trim(),
-      size: sizeCtrl.text.trim(),
+      size: _computedSize,
       stitching: stitchingCtrl.text.trim(),
       fabric: fabricCtrl.text.trim(),
+      color: _computedColor,
       work: workCtrl.text.trim(),
       extra: extraCtrl.text.trim(),
     );
@@ -358,7 +401,51 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
           children: [
             _field(descriptionCtrl, 'Description (festive hook line)', maxLines: 2),
             _field(productNameCtrl, 'Product Name'),
-            _field(sizeCtrl, 'Size'),
+
+            _sectionLabel('Size'),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: true, label: Text('Inches')),
+                ButtonSegment(value: false, label: Text('Standard (S/M/L)')),
+              ],
+              selected: {_sizeIsInches},
+              onSelectionChanged: (s) => setState(() => _sizeIsInches = s.first),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: (_sizeIsInches ? _inchSizes : _standardSizes).map((s) {
+                final selectedSet = _sizeIsInches ? _selectedInchSizes : _selectedStandardSizes;
+                return FilterChip(
+                  label: Text(s),
+                  selected: selectedSet.contains(s),
+                  onSelected: (sel) => setState(() {
+                    sel ? selectedSet.add(s) : selectedSet.remove(s);
+                  }),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            _field(sizeExtraCtrl, 'Other / notes on size'),
+
+            _sectionLabel('Color'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: _colorEmojis.entries.map((e) {
+                return FilterChip(
+                  label: Text('${e.value} ${e.key}'),
+                  selected: _selectedColors.contains(e.key),
+                  onSelected: (sel) => setState(() {
+                    sel ? _selectedColors.add(e.key) : _selectedColors.remove(e.key);
+                  }),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 8),
+            _field(colorExtraCtrl, 'Other / notes on color'),
+
             _field(stitchingCtrl, 'Stitching'),
             _field(fabricCtrl, 'Fabric'),
             _field(workCtrl, 'Work'),
@@ -396,6 +483,7 @@ String buildCaption({
   required String size,
   required String stitching,
   required String fabric,
+  required String color,
   required String work,
   required String extra,
 }) {
@@ -411,6 +499,7 @@ String buildCaption({
     'Size': size,
     'Stitching': stitching,
     'Fabric': fabric,
+    'Color': color,
     'Work': work,
   };
   for (final entry in fields.entries) {
