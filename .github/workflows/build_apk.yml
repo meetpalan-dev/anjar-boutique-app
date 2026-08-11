@@ -26,26 +26,22 @@ jobs:
       - name: Bump Android compileSdk
         run: |
           sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
-          echo "----- build.gradle.kts after edit -----"
-          cat android/app/build.gradle.kts
-
-      - name: Force compileSdk 36 on all library subprojects
-        run: |
-          cat >> android/build.gradle.kts << 'EOF'
-
-          subprojects {
-              plugins.withType<com.android.build.gradle.LibraryPlugin> {
-                  extensions.configure<com.android.build.gradle.LibraryExtension> {
-                      compileSdk = 36
-                  }
-              }
-          }
-          EOF
-          echo "----- root build.gradle.kts after edit -----"
-          cat android/build.gradle.kts
 
       - name: Install dependencies
         run: flutter pub get
+
+      - name: Patch onnxruntime plugin's own compileSdk
+        run: |
+          PLUGIN_DIR=$(find ~/.pub-cache -maxdepth 3 -type d -iname "onnxruntime-*" | head -n 1)
+          echo "Found onnxruntime package at: $PLUGIN_DIR"
+          echo "----- before patch -----"
+          find "$PLUGIN_DIR/android" -name "build.gradle*" -exec cat {} \;
+          find "$PLUGIN_DIR/android" -name "build.gradle*" | xargs sed -i \
+            -e 's/compileSdkVersion [0-9]\+/compileSdkVersion 36/' \
+            -e 's/compileSdk = [0-9]\+/compileSdk = 36/' \
+            -e 's/compileSdk [0-9]\+/compileSdk 36/'
+          echo "----- after patch -----"
+          find "$PLUGIN_DIR/android" -name "build.gradle*" -exec cat {} \;
 
       - name: Build release APK
         run: flutter build apk --release
@@ -55,3 +51,4 @@ jobs:
         with:
           name: anjar-boutique-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          
