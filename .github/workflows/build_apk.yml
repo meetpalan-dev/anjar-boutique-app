@@ -29,20 +29,20 @@ jobs:
           echo "----- build.gradle.kts after edit -----"
           cat android/app/build.gradle.kts
 
-      - name: Force compileSdk 36 via Gradle init script
+      - name: Force compileSdk 36 on all library subprojects
         run: |
-          mkdir -p ~/.gradle/init.d
-          cat > ~/.gradle/init.d/compileSdk.init.gradle.kts << 'EOF'
-          allprojects {
-              plugins.withId("com.android.library") {
-                  extensions.configure<com.android.build.gradle.BaseExtension> {
-                      compileSdkVersion(36)
+          cat >> android/build.gradle.kts << 'EOF'
+
+          subprojects {
+              plugins.withType<com.android.build.gradle.LibraryPlugin> {
+                  extensions.configure<com.android.build.gradle.LibraryExtension> {
+                      compileSdk = 36
                   }
               }
           }
           EOF
-          echo "----- init script -----"
-          cat ~/.gradle/init.d/compileSdk.init.gradle.kts
+          echo "----- root build.gradle.kts after edit -----"
+          cat android/build.gradle.kts
 
       - name: Install dependencies
         run: flutter pub get
