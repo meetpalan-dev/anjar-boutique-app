@@ -33,9 +33,7 @@ class AnjarBoutiqueApp extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// COMPOSITING CONFIG — tweak these if the photo placement looks off.
-// Canvas is assumed to match the background template's own size (1080x1080
-// for the current asset). Box values are in canvas pixels.
+// COMPOSITING CONFIG
 // ---------------------------------------------------------------------------
 class CompositeConfig {
   static const int boxLeft = 140;
@@ -101,8 +99,7 @@ class HomeScreen extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// BACKGROUND REMOVAL SCREEN — runs the on-device model, then hands off to
-// the touch-up brush before compositing onto the template.
+// BACKGROUND REMOVAL SCREEN
 // ---------------------------------------------------------------------------
 class BgRemovalScreen extends StatefulWidget {
   final File photoFile;
@@ -115,8 +112,6 @@ class BgRemovalScreen extends StatefulWidget {
 class _BgRemovalScreenState extends State<BgRemovalScreen> {
   String? _error;
 
-  // Cap the working resolution so the model + brush stay fast. The final
-  // post is already a fixed-size template, so this loses no real quality.
   static const int _maxWorkingDimension = 1400;
 
   @override
@@ -188,7 +183,7 @@ class _BgRemovalScreenState extends State<BgRemovalScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// COMPOSITE SCREEN — overlays the cut-out product onto the branded template
+// COMPOSITE SCREEN
 // ---------------------------------------------------------------------------
 class CompositeScreen extends StatefulWidget {
   final img.Image cutout;
@@ -223,7 +218,10 @@ class _CompositeScreenState extends State<CompositeScreen> {
       appBar: AppBar(title: const Text('Preview')),
       body: Center(
         child: _error != null
-            ? Text('Error: $_error')
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('Error: $_error', textAlign: TextAlign.center),
+              )
             : _composited == null
                 ? const CircularProgressIndicator()
                 : Padding(
@@ -266,7 +264,6 @@ Future<Uint8List> compositeOntoTemplate(img.Image photo) async {
   final templateBytes = await rootBundle.load('assets/background_template.png');
   final template = img.decodePng(templateBytes.buffer.asUint8List())!;
 
-  // Scale photo to fit inside the configured box, preserving aspect ratio.
   final boxW = CompositeConfig.boxWidth;
   final boxH = CompositeConfig.boxHeight;
   final scale = (photo.width / boxW > photo.height / boxH)
@@ -285,7 +282,7 @@ Future<Uint8List> compositeOntoTemplate(img.Image photo) async {
 }
 
 // ---------------------------------------------------------------------------
-// DETAILS FORM SCREEN — all fields optional; blank fields are omitted
+// DETAILS FORM SCREEN
 // ---------------------------------------------------------------------------
 class DetailsFormScreen extends StatefulWidget {
   final Uint8List composited;
@@ -305,23 +302,33 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   final colorExtraCtrl = TextEditingController();
   final extraCtrl = TextEditingController();
 
-  bool _sizeIsInches = true;
-  final Set<String> _selectedInchSizes = {};
-  final Set<String> _selectedStandardSizes = {};
+  final Set<String> _selectedSizes = {};
   final Set<String> _selectedColors = {};
 
-  static const List<String> _inchSizes = ['26', '28', '30', '32', '34', '36', '38', '40'];
-  static const List<String> _standardSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL', 'XXXXXL'];
+  // size name -> reference measurement shown as smaller subtext (display
+  // only — never included in the generated caption).
+  static const Map<String, String> _sizeMeasurements = {
+    'S': '36 inch',
+    'M': '38 inch',
+    'L': '40 inch',
+    'XL': '42 inch',
+    'XXL': '44 inch',
+    'XXXL': '46 inch',
+  };
+
   static const Map<String, String> _colorEmojis = {
-    'Red': '🔴',
-    'Orange': '🟠',
-    'Yellow': '🟡',
-    'Green': '🟢',
-    'Blue': '🔵',
-    'Purple': '🟣',
-    'Brown': '🟤',
-    'Black': '⚫',
-    'White': '⚪',
+    'Red': '❤️',
+    'Orange': '🧡',
+    'Yellow': '💛',
+    'Green': '💚',
+    'Blue': '💙',
+    'Purple': '💜',
+    'Brown': '🤎',
+    'Black': '🖤',
+    'White': '🤍',
+    'Pink': '🩷',
+    'Light Blue': '🩵',
+    'Grey': '🩶',
   };
 
   @override
@@ -356,17 +363,42 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
         child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
       );
 
+  /// Lays chips out in a fixed-column grid (rows of [columns]), so options
+  /// sit neatly next to each other instead of flowing unpredictably.
+  Widget _chipGrid(List<Widget> chips, {int columns = 3}) {
+    final rows = <Widget>[];
+    for (var i = 0; i < chips.length; i += columns) {
+      final end = (i + columns > chips.length) ? chips.length : i + columns;
+      final rowItems = chips.sublist(i, end);
+      final slots = <Widget>[];
+      for (var j = 0; j < columns; j++) {
+        if (j > 0) slots.add(const SizedBox(width: 8));
+        slots.add(Expanded(
+          child: j < rowItems.length
+              ? Align(alignment: Alignment.centerLeft, child: rowItems[j])
+              : const SizedBox(),
+        ));
+      }
+      rows.add(Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(children: slots),
+      ));
+    }
+    return Column(children: rows);
+  }
+
+  // Size output: selected size NAMES only (never the reference measurement)
+  // plus the free-text "Other size" value, comma-separated.
   String get _computedSize {
-    final chosen = _sizeIsInches ? _selectedInchSizes : _selectedStandardSizes;
-    final parts = <String>[...chosen];
+    final parts = <String>[..._selectedSizes];
     if (sizeExtraCtrl.text.trim().isNotEmpty) parts.add(sizeExtraCtrl.text.trim());
     return parts.join(', ');
   }
 
+  // Color output: selected color NAMES only (never the emoji) plus the
+  // free-text "Other colour" value, comma-separated.
   String get _computedColor {
-    final parts = <String>[
-      for (final c in _selectedColors) '${_colorEmojis[c]} $c',
-    ];
+    final parts = <String>[..._selectedColors];
     if (colorExtraCtrl.text.trim().isNotEmpty) parts.add(colorExtraCtrl.text.trim());
     return parts.join(', ');
   }
@@ -403,48 +435,42 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
             _field(productNameCtrl, 'Product Name'),
 
             _sectionLabel('Size'),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Inches')),
-                ButtonSegment(value: false, label: Text('Standard (S/M/L)')),
-              ],
-              selected: {_sizeIsInches},
-              onSelectionChanged: (s) => setState(() => _sizeIsInches = s.first),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: (_sizeIsInches ? _inchSizes : _standardSizes).map((s) {
-                final selectedSet = _sizeIsInches ? _selectedInchSizes : _selectedStandardSizes;
+            _chipGrid(
+              _sizeMeasurements.entries.map((e) {
+                final selected = _selectedSizes.contains(e.key);
                 return FilterChip(
-                  label: Text(s),
-                  selected: selectedSet.contains(s),
+                  label: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(e.key, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      Text(e.value, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+                    ],
+                  ),
+                  selected: selected,
                   onSelected: (sel) => setState(() {
-                    sel ? selectedSet.add(s) : selectedSet.remove(s);
+                    sel ? _selectedSizes.add(e.key) : _selectedSizes.remove(e.key);
                   }),
                 );
               }).toList(),
             ),
-            const SizedBox(height: 8),
-            _field(sizeExtraCtrl, 'Other / notes on size'),
+            const SizedBox(height: 4),
+            _field(sizeExtraCtrl, 'Other size'),
 
             _sectionLabel('Color'),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: _colorEmojis.entries.map((e) {
+            _chipGrid(
+              _colorEmojis.entries.map((e) {
+                final selected = _selectedColors.contains(e.key);
                 return FilterChip(
-                  label: Text('${e.value} ${e.key}'),
-                  selected: _selectedColors.contains(e.key),
+                  label: Text('${e.value} ${e.key}', style: const TextStyle(fontSize: 13)),
+                  selected: selected,
                   onSelected: (sel) => setState(() {
                     sel ? _selectedColors.add(e.key) : _selectedColors.remove(e.key);
                   }),
                 );
               }).toList(),
             ),
-            const SizedBox(height: 8),
-            _field(colorExtraCtrl, 'Other / notes on color'),
+            const SizedBox(height: 4),
+            _field(colorExtraCtrl, 'Other colour'),
 
             _field(stitchingCtrl, 'Stitching'),
             _field(fabricCtrl, 'Fabric'),
