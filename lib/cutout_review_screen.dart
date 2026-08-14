@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
+import 'checkerboard.dart';
 import 'touchup_screen.dart';
 
 class CutoutReviewScreen extends StatelessWidget {
@@ -19,7 +20,7 @@ class CutoutReviewScreen extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.all(16),
             child: Text(
-              'Does this look clean, or is some background still showing?',
+              'Does this look clean, or is some background still showing? Pinch to zoom, drag to pan.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 16),
             ),
@@ -27,11 +28,17 @@ class CutoutReviewScreen extends StatelessWidget {
           Expanded(
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFBDBDBD),
-                borderRadius: BorderRadius.circular(12),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+              child: Checkerboard(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 6,
+                  child: Center(
+                    child: Image.memory(previewBytes, fit: BoxFit.contain),
+                  ),
+                ),
               ),
-              child: Image.memory(previewBytes, fit: BoxFit.contain),
             ),
           ),
           Padding(
