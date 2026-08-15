@@ -140,7 +140,12 @@ class _BgRemovalScreenState extends State<BgRemovalScreen> {
       final cutout = await BackgroundRemover.cutout(photo);
       if (!mounted) return;
 
-      Navigator.pushReplacement(
+      // Use push, not pushReplacement — the onConfirmed closure below reuses
+      // this screen's `context` later (when the user taps Looks Good, which
+      // can be much later, after Fix It too). pushReplacement would remove
+      // this screen from the tree immediately, leaving that context stale —
+      // any later Navigator.push(context, ...) call on it silently fails.
+      Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => CutoutReviewScreen(
