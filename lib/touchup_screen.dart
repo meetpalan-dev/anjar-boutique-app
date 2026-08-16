@@ -28,6 +28,15 @@ class _TouchUpScreenState extends State<TouchUpScreen> {
   // repainted every frame via CustomPaint — no Dart-side pixel mutation
   // happens until the stroke is committed.
   final List<Offset> _liveStrokePoints = [];
+  final Set<int> _activePointers = {};
+
+  // Manual pinch/pan state — driven entirely by our own two-finger
+  // tracking rather than InteractiveViewer's built-in recognizer.
+  final Map<int, Offset> _rawPointers = {};
+  double? _lastPinchDistance;
+  Offset? _lastPinchMid;
+  Matrix4 _viewMatrix = Matrix4.identity();
+
   bool _loading = true;
   bool _committing = false;
 
@@ -181,7 +190,11 @@ class _TouchUpScreenState extends State<TouchUpScreen> {
           ),
           TextButton(
             onPressed: _loading || _committing ? null : _tapDone,
-            child: const Text('Done', style: TextStyle(color: Colors.white)),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFB33A2E),
+              disabledForegroundColor: Colors.black26,
+            ),
+            child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),
         ],
       ),
@@ -205,40 +218,115 @@ class _TouchUpScreenState extends State<TouchUpScreen> {
                     clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
                     child: Checkerboard(
-                      // panEnabled: false so a single finger is always free
-                      // for painting; pinch (2 fingers) still zooms.
-                      child: InteractiveViewer(
-                        panEnabled: false,
-                        scaleEnabled: true,
-                        minScale: 0.5,
-                        maxScale: 6,
-                        child: Center(
-                          child: AspectRatio(
-                            aspectRatio: _current!.width / _current!.height,
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final scale = constraints.maxWidth / _current!.width;
-                                return GestureDetector(
-                                  onPanDown: (d) => setState(() {
-                                    _liveStrokePoints.add(d.localPosition / scale);
-                                  }),
-                                  onPanUpdate: (d) => setState(() {
-                                    _liveStrokePoints.add(d.localPosition / scale);
-                                  }),
-                                  onPanEnd: (_) => _commitStroke(),
-                                  child: CustomPaint(
-                                    size: Size(constraints.maxWidth, constraints.maxWidth / (_current!.width / _current!.height)),
-                                    painter: _LiveEditPainter(
-                                      base: _current!,
-                                      original: _original!,
-                                      strokePoints: _liveStrokePoints,
-                                      mode: _mode,
-                                      radius: _brushRadius,
-                                      displayScale: scale,
+                      child: Listener(
+                        // OUTER listener: tracks raw two-finger positions in
+                        // stable, un-transformed viewport coordinates and
+                        // drives _viewMatrix directly. This bypasses
+                        // InteractiveViewer's built-in gesture recognizer
+                        // entirely, so there's no arena conflict with the
+                        // single-finger paint gesture below.
+                        onPointerDown: (e) {
+                          _activePointers.add(e.pointer);
+                          _rawPointers[e.pointer] = e.localPosition;
+                          if (_rawPointers.length == 2) {
+                            final pts = _rawPointers.values.toList();
+                            _lastPinchDistance = (pts[0] - pts[1]).distance;
+                            _lastPinchMid = (pts[0] + pts[1]) / 2;
+                          }
+                        },
+                        onPointerMove: (e) {
+                          if (!_rawPointers.containsKey(e.pointer)) return;
+                          _rawPointers[e.pointer] = e.localPosition;
+                          if (_rawPointers.length == 2) {
+                            final pts = _rawPointers.values.toList();
+                            final dist = (pts[0] - pts[1]).distance;
+                            final mid = (pts[0] + pts[1]) / 2;
+                            if (_lastPinchDistance != null && _lastPinchDistance! > 1) {
+                              final factor = (dist / _lastPinchDistance!).clamp(0.85, 1.18);
+                              final currentScale = _viewMatrix.getMaxScaleOnAxis();
+                              final nextScale = currentScale * factor;
+                              if (nextScale >= 0.5 && nextScale <= 6) {
+                                final panDelta = mid - _lastPinchMid!;
+                                final scaleAboutMid = Matrix4.identity()
+                                  ..translate(mid.dx, mid.dy)
+                                  ..scale(factor)
+                                  ..translate(-mid.dx, -mid.dy);
+                                final panMatrix = Matrix4.identity()..translate(panDelta.dx, panDelta.dy);
+                                setState(() {
+                                  _viewMatrix = panMatrix.multiplied(scaleAboutMid).multiplied(_viewMatrix);
+                                });
+                              }
+                            }
+                            _lastPinchDistance = dist;
+                            _lastPinchMid = mid;
+                          }
+                        },
+                        onPointerUp: (e) {
+                          _activePointers.remove(e.pointer);
+                          _rawPointers.remove(e.pointer);
+                          if (_rawPointers.length < 2) {
+                            _lastPinchDistance = null;
+                            _lastPinchMid = null;
+                          }
+                          if (_activePointers.isEmpty) _commitStroke();
+                        },
+                        onPointerCancel: (e) {
+                          _activePointers.remove(e.pointer);
+                          _rawPointers.remove(e.pointer);
+                          if (_rawPointers.length < 2) {
+                            _lastPinchDistance = null;
+                            _lastPinchMid = null;
+                          }
+                          if (_activePointers.isEmpty) _commitStroke();
+                        },
+                        child: Transform(
+                          transform: _viewMatrix,
+                          child: Center(
+                            child: AspectRatio(
+                              aspectRatio: _current!.width / _current!.height,
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final scale = constraints.maxWidth / _current!.width;
+                                  return Listener(
+                                    // INNER listener: single-finger paint,
+                                    // in content-space coordinates (Flutter
+                                    // auto-corrects localPosition for the
+                                    // ancestor Transform above).
+                                    onPointerDown: (e) {
+                                      _activePointers.add(e.pointer);
+                                      if (_activePointers.length == 1) {
+                                        setState(() => _liveStrokePoints.add(e.localPosition / scale));
+                                      } else {
+                                        _commitStroke();
+                                      }
+                                    },
+                                    onPointerMove: (e) {
+                                      if (_activePointers.length == 1 && _activePointers.contains(e.pointer)) {
+                                        setState(() => _liveStrokePoints.add(e.localPosition / scale));
+                                      }
+                                    },
+                                    onPointerUp: (e) {
+                                      _activePointers.remove(e.pointer);
+                                      if (_activePointers.isEmpty) _commitStroke();
+                                    },
+                                    onPointerCancel: (e) {
+                                      _activePointers.remove(e.pointer);
+                                      if (_activePointers.isEmpty) _commitStroke();
+                                    },
+                                    child: CustomPaint(
+                                      size: Size(constraints.maxWidth, constraints.maxWidth / (_current!.width / _current!.height)),
+                                      painter: _LiveEditPainter(
+                                        base: _current!,
+                                        original: _original!,
+                                        strokePoints: _liveStrokePoints,
+                                        mode: _mode,
+                                        radius: _brushRadius,
+                                        displayScale: scale,
+                                      ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),
@@ -260,6 +348,11 @@ class _TouchUpScreenState extends State<TouchUpScreen> {
                               max: 100,
                               onChanged: (v) => setState(() => _brushRadius = v),
                             ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.center_focus_strong),
+                            tooltip: 'Reset zoom',
+                            onPressed: () => setState(() => _viewMatrix = Matrix4.identity()),
                           ),
                         ],
                       ),
