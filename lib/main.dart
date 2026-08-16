@@ -9,6 +9,9 @@ import 'package:image/image.dart' as img;
 import 'bg_removal.dart';
 import 'touchup_screen.dart';
 import 'cutout_review_screen.dart';
+import 'positioning_screen.dart';
+import 'settings_screen.dart';
+import 'suggestions_store.dart';
 
 void main() {
   runApp(const AnjarBoutiqueApp());
@@ -33,16 +36,6 @@ class AnjarBoutiqueApp extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// COMPOSITING CONFIG
-// ---------------------------------------------------------------------------
-class CompositeConfig {
-  static const int boxLeft = 140;
-  static const int boxTop = 170;
-  static const int boxWidth = 800;
-  static const int boxHeight = 850;
-}
-
-// ---------------------------------------------------------------------------
 // HOME SCREEN
 // ---------------------------------------------------------------------------
 class HomeScreen extends StatelessWidget {
@@ -62,7 +55,18 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Anjar Boutique')),
+      appBar: AppBar(
+        title: const Text('Anjar Boutique'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+            },
+          ),
+        ],
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -153,7 +157,7 @@ class _BgRemovalScreenState extends State<BgRemovalScreen> {
             onConfirmed: (edited) {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => CompositeScreen(cutout: edited)),
+                MaterialPageRoute(builder: (_) => PositioningScreen(cutout: edited)),
               );
             },
           ),
@@ -188,105 +192,6 @@ class _BgRemovalScreenState extends State<BgRemovalScreen> {
 }
 
 // ---------------------------------------------------------------------------
-// COMPOSITE SCREEN
-// ---------------------------------------------------------------------------
-class CompositeScreen extends StatefulWidget {
-  final img.Image cutout;
-  const CompositeScreen({super.key, required this.cutout});
-
-  @override
-  State<CompositeScreen> createState() => _CompositeScreenState();
-}
-
-class _CompositeScreenState extends State<CompositeScreen> {
-  Uint8List? _composited;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _runComposite();
-  }
-
-  Future<void> _runComposite() async {
-    try {
-      final result = await compositeOntoTemplate(widget.cutout);
-      setState(() => _composited = result);
-    } catch (e) {
-      setState(() => _error = e.toString());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Preview')),
-      body: Center(
-        child: _error != null
-            ? Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text('Error: $_error', textAlign: TextAlign.center),
-              )
-            : _composited == null
-                ? const CircularProgressIndicator()
-                : Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.memory(_composited!, fit: BoxFit.contain),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => DetailsFormScreen(composited: _composited!),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.arrow_forward),
-                          label: const Text('Continue'),
-                          style: FilledButton.styleFrom(minimumSize: const Size(220, 50)),
-                        ),
-                      ],
-                    ),
-                  ),
-      ),
-    );
-  }
-}
-
-/// Loads the bundled background template and pastes the (already background-
-/// removed) cutout on top, scaled to fit CompositeConfig's box (preserving
-/// aspect ratio, centered). Transparent pixels let the mandala show through.
-Future<Uint8List> compositeOntoTemplate(img.Image photo) async {
-  final templateBytes = await rootBundle.load('assets/background_template.png');
-  final template = img.decodePng(templateBytes.buffer.asUint8List())!;
-
-  final boxW = CompositeConfig.boxWidth;
-  final boxH = CompositeConfig.boxHeight;
-  final scale = (photo.width / boxW > photo.height / boxH)
-      ? boxW / photo.width
-      : boxH / photo.height;
-  final newW = (photo.width * scale).round();
-  final newH = (photo.height * scale).round();
-  final resizedPhoto = img.copyResize(photo, width: newW, height: newH, interpolation: img.Interpolation.average);
-
-  final canvas = img.Image.from(template);
-  final pasteX = CompositeConfig.boxLeft + ((boxW - newW) ~/ 2);
-  final pasteY = CompositeConfig.boxTop + ((boxH - newH) ~/ 2);
-  img.compositeImage(canvas, resizedPhoto, dstX: pasteX, dstY: pasteY);
-
-  return Uint8List.fromList(img.encodePng(canvas));
-}
-
-// ---------------------------------------------------------------------------
 // DETAILS FORM SCREEN
 // ---------------------------------------------------------------------------
 class DetailsFormScreen extends StatefulWidget {
@@ -307,19 +212,29 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   final colorExtraCtrl = TextEditingController();
   final extraCtrl = TextEditingController();
 
-  final Set<String> _selectedSizes = {};
+  final Set<String> _selectedSizeAlphas = {};
   final Set<String> _selectedColors = {};
+  bool _sizeNumberMode = false; // OFF = alphabet (spec default), ON = number
+  bool _showMoreSizes = false;
 
-  // size name -> reference measurement shown as smaller subtext (display
-  // only — never included in the generated caption).
-  static const Map<String, String> _sizeMeasurements = {
-    'S': '36 inch',
-    'M': '38 inch',
-    'L': '40 inch',
-    'XL': '42 inch',
-    'XXL': '44 inch',
-    'XXXL': '46 inch',
-  };
+  List<String> _productNameSuggestions = SuggestionsStore.defaultProductNames;
+  List<String> _stitchingSuggestions = SuggestionsStore.defaultStitching;
+  List<String> _fabricSuggestions = SuggestionsStore.defaultFabric;
+  List<String> _workSuggestions = SuggestionsStore.defaultWork;
+
+  // alpha size -> inch measurement, in canonical smallest-to-largest order
+  static const List<MapEntry<String, int>> _sizeMap = [
+    MapEntry('XS', 34),
+    MapEntry('S', 36),
+    MapEntry('M', 38),
+    MapEntry('L', 40),
+    MapEntry('XL', 42),
+    MapEntry('XXL', 44),
+    MapEntry('XXXL', 46),
+    MapEntry('4XL', 48),
+    MapEntry('5XL', 50),
+  ];
+  static const int _baseSizeCount = 6; // XS..XXL always visible; rest behind "More sizes"
 
   static const Map<String, String> _colorEmojis = {
     'Red': '❤️',
@@ -335,6 +250,26 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     'Light Blue': '🩵',
     'Grey': '🩶',
   };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSuggestions();
+  }
+
+  Future<void> _loadSuggestions() async {
+    final pn = await SuggestionsStore.getProductNames();
+    final st = await SuggestionsStore.getStitching();
+    final fb = await SuggestionsStore.getFabric();
+    final wk = await SuggestionsStore.getWork();
+    if (!mounted) return;
+    setState(() {
+      _productNameSuggestions = pn;
+      _stitchingSuggestions = st;
+      _fabricSuggestions = fb;
+      _workSuggestions = wk;
+    });
+  }
 
   @override
   void dispose() {
@@ -363,13 +298,43 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     );
   }
 
+  /// A normal text field with tappable suggestion chips above it. Tapping a
+  /// chip fills the field; the user can still type anything else.
+  Widget _suggestionField(TextEditingController ctrl, String label, List<String> suggestions) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (suggestions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: suggestions.map((s) {
+                  return ActionChip(
+                    label: Text(s, style: const TextStyle(fontSize: 12)),
+                    onPressed: () => setState(() => ctrl.text = s),
+                  );
+                }).toList(),
+              ),
+            ),
+          TextField(
+            controller: ctrl,
+            decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _sectionLabel(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
       );
 
-  /// Lays chips out in a fixed-column grid (rows of [columns]), so options
-  /// sit neatly next to each other instead of flowing unpredictably.
+  /// Lays chips out in a fixed-column grid (rows of [columns]).
   Widget _chipGrid(List<Widget> chips, {int columns = 3}) {
     final rows = <Widget>[];
     for (var i = 0; i < chips.length; i += columns) {
@@ -384,26 +349,41 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
               : const SizedBox(),
         ));
       }
-      rows.add(Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(children: slots),
-      ));
+      rows.add(Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: slots)));
     }
     return Column(children: rows);
   }
 
-  // Size output: selected size NAMES only (never the reference measurement)
-  // plus the free-text "Other size" value, comma-separated.
+  Widget _sizeChip(MapEntry<String, int> entry) {
+    final selected = _selectedSizeAlphas.contains(entry.key);
+    final label = _sizeNumberMode ? '${entry.value} inch' : '${entry.value} inch (${entry.key})';
+    return FilterChip(
+      label: Text(label, style: const TextStyle(fontSize: 11.5)),
+      selected: selected,
+      onSelected: (sel) => setState(() {
+        sel ? _selectedSizeAlphas.add(entry.key) : _selectedSizeAlphas.remove(entry.key);
+      }),
+    );
+  }
+
+  // Selected sizes, in canonical smallest->largest order (the _sizeMap list
+  // is already ordered, so filtering it preserves that order for free).
+  List<MapEntry<String, int>> get _selectedSizeEntries =>
+      _sizeMap.where((e) => _selectedSizeAlphas.contains(e.key)).toList();
+
   String get _computedSize {
-    final parts = <String>[..._selectedSizes];
+    final labels = _sizeNumberMode
+        ? _selectedSizeEntries.map((e) => '${e.value}').toList()
+        : _selectedSizeEntries.map((e) => e.key).toList();
+    final parts = [...labels];
     if (sizeExtraCtrl.text.trim().isNotEmpty) parts.add(sizeExtraCtrl.text.trim());
     return parts.join(', ');
   }
 
-  // Color output: selected color NAMES only (never the emoji) plus the
-  // free-text "Other colour" value, comma-separated.
+  // Color output includes the emoji alongside the name, e.g. "❤️ Red".
+  // Custom "Other colour" text is kept as-is, with no invented emoji.
   String get _computedColor {
-    final parts = <String>[..._selectedColors];
+    final parts = <String>[for (final c in _selectedColors) '${_colorEmojis[c]} $c'];
     if (colorExtraCtrl.text.trim().isNotEmpty) parts.add(colorExtraCtrl.text.trim());
     return parts.join(', ');
   }
@@ -421,14 +401,15 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     );
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => ResultScreen(composited: widget.composited, caption: caption),
-      ),
+      MaterialPageRoute(builder: (_) => ResultScreen(composited: widget.composited, caption: caption)),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final baseSizes = _sizeMap.sublist(0, _baseSizeCount);
+    final moreSizes = _sizeMap.sublist(_baseSizeCount);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Product Details')),
       body: SingleChildScrollView(
@@ -437,28 +418,28 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _field(descriptionCtrl, 'Description (festive hook line)', maxLines: 2),
-            _field(productNameCtrl, 'Product Name'),
+            _suggestionField(productNameCtrl, 'Product Name', _productNameSuggestions),
 
-            _sectionLabel('Size'),
-            _chipGrid(
-              _sizeMeasurements.entries.map((e) {
-                final selected = _selectedSizes.contains(e.key);
-                return FilterChip(
-                  label: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(e.key, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                      Text(e.value, style: const TextStyle(fontSize: 10, color: Colors.black54)),
-                    ],
-                  ),
-                  selected: selected,
-                  onSelected: (sel) => setState(() {
-                    sel ? _selectedSizes.add(e.key) : _selectedSizes.remove(e.key);
-                  }),
-                );
-              }).toList(),
+            Row(
+              children: [
+                Expanded(child: _sectionLabel('Size')),
+                const Text('Number', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                Switch(
+                  value: _sizeNumberMode,
+                  onChanged: (v) => setState(() => _sizeNumberMode = v),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
+            _chipGrid(baseSizes.map(_sizeChip).toList()),
+            if (_showMoreSizes) _chipGrid(moreSizes.map(_sizeChip).toList()),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _showMoreSizes = !_showMoreSizes),
+                icon: Icon(_showMoreSizes ? Icons.remove : Icons.add, size: 18),
+                label: Text(_showMoreSizes ? 'Fewer sizes' : 'More sizes'),
+              ),
+            ),
             _field(sizeExtraCtrl, 'Other size'),
 
             _sectionLabel('Color'),
@@ -477,9 +458,9 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
             const SizedBox(height: 4),
             _field(colorExtraCtrl, 'Other colour'),
 
-            _field(stitchingCtrl, 'Stitching'),
-            _field(fabricCtrl, 'Fabric'),
-            _field(workCtrl, 'Work'),
+            _suggestionField(stitchingCtrl, 'Stitching', _stitchingSuggestions),
+            _suggestionField(fabricCtrl, 'Fabric', _fabricSuggestions),
+            _suggestionField(workCtrl, 'Work', _workSuggestions),
             _field(extraCtrl, 'Extra note (optional)', maxLines: 2),
             const SizedBox(height: 8),
             FilledButton.icon(
@@ -508,6 +489,38 @@ const List<String> defaultHashtags = [
   '#KutchEmbroidery',
 ];
 
+// Product-specific hashtag sets for the predefined Product Name suggestions.
+// A custom (typed) Product Name falls back to defaultHashtags instead.
+const Map<String, List<String>> productHashtags = {
+  'Angrakha Kurti': ['#angrakhakurti', '#kurti', '#IndianEthnicWear'],
+  'Straight Kurti': ['#kurti', '#StraightKurti', '#IndianEthnicWear'],
+  'Kurti with Salwar & With Dupatta': ['#kurtiset', '#SalwarKurti', '#IndianEthnicWear'],
+  'Kurti with Palazzos & With Dupatta': ['#kurtiplazoset', '#PalazzoSet', '#IndianEthnicWear'],
+  'Lehenga With Choli & Dupatta': ['#lehengaCholi', '#chaniyacholi', '#LehengaSet'],
+};
+
+List<String> _buildHashtags(String productName) {
+  final trimmed = productName.trim();
+  String matchKey = '';
+  for (final key in productHashtags.keys) {
+    if (key.toLowerCase() == trimmed.toLowerCase()) {
+      matchKey = key;
+      break;
+    }
+  }
+
+  final tags = <String>[];
+  if (matchKey.isNotEmpty) {
+    tags.addAll(productHashtags[matchKey]!);
+  } else {
+    tags.addAll(defaultHashtags);
+  }
+  if (!tags.contains('#anjarboutique')) tags.add('#anjarboutique');
+
+  final seen = <String>{};
+  return tags.where((t) => seen.add(t)).toList();
+}
+
 String buildCaption({
   required String description,
   required String productName,
@@ -521,16 +534,16 @@ String buildCaption({
   final buffer = StringBuffer();
 
   if (description.isNotEmpty) {
-    buffer.writeln('🖤 $description 🖤');
+    buffer.writeln(description);
     buffer.writeln('•');
   }
 
   final fields = <String, String>{
     'Product Name': productName,
-    'Size': size,
     'Stitching': stitching,
-    'Fabric': fabric,
+    'Size': size,
     'Color': color,
+    'Fabric': fabric,
     'Work': work,
   };
   for (final entry in fields.entries) {
@@ -546,10 +559,11 @@ String buildCaption({
   buffer.writeln('•');
   buffer.writeln('•');
   buffer.writeln('•');
-  buffer.writeln(defaultHashtags.join(' '));
+  buffer.writeln(_buildHashtags(productName).join(' '));
 
   return buffer.toString().trim();
 }
+
 
 // ---------------------------------------------------------------------------
 // RESULT SCREEN — final image + caption, copy + share
