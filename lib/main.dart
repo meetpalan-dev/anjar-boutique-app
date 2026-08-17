@@ -12,25 +12,42 @@ import 'cutout_review_screen.dart';
 import 'positioning_screen.dart';
 import 'settings_screen.dart';
 import 'suggestions_store.dart';
+import 'theme_store.dart';
+import 'post_history_store.dart';
+import 'history_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ThemeStore.load();
   runApp(const AnjarBoutiqueApp());
 }
 
 class AnjarBoutiqueApp extends StatelessWidget {
   const AnjarBoutiqueApp({super.key});
 
+  static const Color brandSeed = Color(0xFFB33A2E);
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Anjar Boutique',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: const Color(0xFFB33A2E),
-        scaffoldBackgroundColor: const Color(0xFFFAF6F1),
-      ),
-      home: const HomeScreen(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: ThemeStore.mode,
+      builder: (context, mode, _) {
+        return MaterialApp(
+          title: 'Anjar Boutique',
+          debugShowCheckedModeBanner: false,
+          themeMode: mode,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(seedColor: brandSeed, brightness: Brightness.light),
+            scaffoldBackgroundColor: const Color(0xFFFAF6F1),
+          ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(seedColor: brandSeed, brightness: Brightness.dark),
+          ),
+          home: const HomeScreen(),
+        );
+      },
     );
   }
 }
@@ -58,6 +75,13 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Anjar Boutique'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'History',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
@@ -221,6 +245,8 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   List<String> _stitchingSuggestions = SuggestionsStore.defaultStitching;
   List<String> _fabricSuggestions = SuggestionsStore.defaultFabric;
   List<String> _workSuggestions = SuggestionsStore.defaultWork;
+  List<String> _categorySuggestions = SuggestionsStore.defaultCategories;
+  String? _selectedCategory;
 
   // alpha size -> inch measurement, in canonical smallest-to-largest order
   static const List<MapEntry<String, int>> _sizeMap = [
@@ -234,7 +260,9 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     MapEntry('4XL', 48),
     MapEntry('5XL', 50),
   ];
-  static const int _baseSizeCount = 6; // XS..XXL always visible; rest behind "More sizes"
+  static const int _baseSizeCount = 6; // kept for reference; superseded by _hiddenByDefault below
+  // S, M, L, XL, XXL are visible by default; the rest live behind "More sizes".
+  static const Set<String> _hiddenByDefault = {'XS', 'XXXL', '4XL', '5XL'};
 
   static const Map<String, String> _colorEmojis = {
     'Red': '❤️',
@@ -262,12 +290,14 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     final st = await SuggestionsStore.getStitching();
     final fb = await SuggestionsStore.getFabric();
     final wk = await SuggestionsStore.getWork();
+    final cat = await SuggestionsStore.getCategories();
     if (!mounted) return;
     setState(() {
       _productNameSuggestions = pn;
       _stitchingSuggestions = st;
       _fabricSuggestions = fb;
       _workSuggestions = wk;
+      _categorySuggestions = cat;
     });
   }
 
@@ -356,9 +386,18 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
 
   Widget _sizeChip(MapEntry<String, int> entry) {
     final selected = _selectedSizeAlphas.contains(entry.key);
-    final label = _sizeNumberMode ? '${entry.value} inch' : '${entry.value} inch (${entry.key})';
+    // Alphabet mode: size name is the bold/primary value, inches is secondary.
+    // Number mode: inches is the bold/primary value, size name is secondary.
+    final primary = _sizeNumberMode ? '${entry.value} inch' : entry.key;
+    final secondary = _sizeNumberMode ? '(${entry.key})' : '${entry.value} inch';
     return FilterChip(
-      label: Text(label, style: const TextStyle(fontSize: 11.5)),
+      label: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(primary, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+          Text(secondary, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+        ],
+      ),
       selected: selected,
       onSelected: (sel) => setState(() {
         sel ? _selectedSizeAlphas.add(entry.key) : _selectedSizeAlphas.remove(entry.key);
@@ -389,9 +428,14 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   }
 
   void _generate() {
+    final id = PostHistoryStore.generateId();
+    final category = _selectedCategory ?? '';
+    final productName = productNameCtrl.text.trim();
     final caption = buildCaption(
+      id: id,
+      category: category,
       description: descriptionCtrl.text.trim(),
-      productName: productNameCtrl.text.trim(),
+      productName: productName,
       size: _computedSize,
       stitching: stitchingCtrl.text.trim(),
       fabric: fabricCtrl.text.trim(),
@@ -401,14 +445,40 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     );
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ResultScreen(composited: widget.composited, caption: caption)),
+      MaterialPageRoute(
+        builder: (_) => ResultScreen(
+          composited: widget.composited,
+          caption: caption,
+          id: id,
+          category: category,
+          productName: productName,
+        ),
+      ),
     );
   }
 
+  Widget _groupLabel(String text) => Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 10),
+        child: Text(
+          text.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      );
+
+  Widget _divider() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Divider(height: 1, color: Theme.of(context).dividerColor.withValues(alpha: 0.5)),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final baseSizes = _sizeMap.sublist(0, _baseSizeCount);
-    final moreSizes = _sizeMap.sublist(_baseSizeCount);
+    final baseSizes = _sizeMap.where((e) => !_hiddenByDefault.contains(e.key)).toList();
+    final moreSizes = _sizeMap.where((e) => _hiddenByDefault.contains(e.key)).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Product Details')),
@@ -417,9 +487,25 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _groupLabel('Product'),
+            _sectionLabel('Category'),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _categorySuggestions.map((c) {
+                final selected = _selectedCategory == c;
+                return FilterChip(
+                  label: Text(c, style: const TextStyle(fontSize: 12.5)),
+                  selected: selected,
+                  onSelected: (sel) => setState(() => _selectedCategory = sel ? c : null),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
             _field(descriptionCtrl, 'Description (festive hook line)', maxLines: 2),
             _suggestionField(productNameCtrl, 'Product Name', _productNameSuggestions),
 
+            _divider(),
             Row(
               children: [
                 Expanded(child: _sectionLabel('Size')),
@@ -431,7 +517,12 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
               ],
             ),
             _chipGrid(baseSizes.map(_sizeChip).toList()),
-            if (_showMoreSizes) _chipGrid(moreSizes.map(_sizeChip).toList()),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 180),
+              crossFadeState: _showMoreSizes ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+              firstChild: _chipGrid(moreSizes.map(_sizeChip).toList()),
+              secondChild: const SizedBox(width: double.infinity),
+            ),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -442,7 +533,7 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
             ),
             _field(sizeExtraCtrl, 'Other size'),
 
-            _sectionLabel('Color'),
+            _sectionLabel('Colour'),
             _chipGrid(
               _colorEmojis.entries.map((e) {
                 final selected = _selectedColors.contains(e.key);
@@ -458,10 +549,13 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
             const SizedBox(height: 4),
             _field(colorExtraCtrl, 'Other colour'),
 
+            _divider(),
+            _groupLabel('Product Details'),
             _suggestionField(stitchingCtrl, 'Stitching', _stitchingSuggestions),
             _suggestionField(fabricCtrl, 'Fabric', _fabricSuggestions),
             _suggestionField(workCtrl, 'Work', _workSuggestions),
             _field(extraCtrl, 'Extra note (optional)', maxLines: 2),
+
             const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: _generate,
@@ -522,6 +616,8 @@ List<String> _buildHashtags(String productName) {
 }
 
 String buildCaption({
+  required String id,
+  required String category,
   required String description,
   required String productName,
   required String size,
@@ -539,6 +635,8 @@ String buildCaption({
   }
 
   final fields = <String, String>{
+    'ID': id,
+    'Category': category,
     'Product Name': productName,
     'Stitching': stitching,
     'Size': size,
@@ -568,20 +666,62 @@ String buildCaption({
 // ---------------------------------------------------------------------------
 // RESULT SCREEN — final image + caption, copy + share
 // ---------------------------------------------------------------------------
-class ResultScreen extends StatelessWidget {
+class ResultScreen extends StatefulWidget {
   final Uint8List composited;
   final String caption;
-  const ResultScreen({super.key, required this.composited, required this.caption});
+  final String id;
+  final String category;
+  final String productName;
+
+  const ResultScreen({
+    super.key,
+    required this.composited,
+    required this.caption,
+    required this.id,
+    required this.category,
+    required this.productName,
+  });
+
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Auto-save to history as soon as a post is generated — no separate
+    // "Save" step needed. Fire-and-forget: a save failure shouldn't block
+    // the user from copying/sharing the caption they already have.
+    PostHistoryStore.save(
+      id: widget.id,
+      imageBytes: widget.composited,
+      caption: widget.caption,
+      category: widget.category,
+      productName: widget.productName,
+    ).catchError((_) {
+      // Best-effort — the generated post is still usable even if saving
+      // to history fails (e.g. disk space).
+      return PostRecord(
+        id: widget.id,
+        createdAt: DateTime.now(),
+        category: widget.category,
+        productName: widget.productName,
+        caption: widget.caption,
+        imagePath: '',
+      );
+    });
+  }
 
   Future<File> _saveTempImage() async {
     final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/anjar_post_${DateTime.now().millisecondsSinceEpoch}.png');
-    await file.writeAsBytes(composited);
+    await file.writeAsBytes(widget.composited);
     return file;
   }
 
   Future<void> _copyCaption(BuildContext context) async {
-    await Clipboard.setData(ClipboardData(text: caption));
+    await Clipboard.setData(ClipboardData(text: widget.caption));
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Caption copied')),
@@ -591,7 +731,7 @@ class ResultScreen extends StatelessWidget {
 
   Future<void> _share(BuildContext context) async {
     final file = await _saveTempImage();
-    await Share.shareXFiles([XFile(file.path)], text: caption);
+    await Share.shareXFiles([XFile(file.path)], text: widget.caption);
   }
 
   @override
@@ -605,17 +745,17 @@ class ResultScreen extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.memory(composited),
+              child: Image.memory(widget.composited),
             ),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 border: Border.all(color: Colors.black12),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: SelectableText(caption),
+              child: SelectableText(widget.caption),
             ),
             const SizedBox(height: 16),
             Row(

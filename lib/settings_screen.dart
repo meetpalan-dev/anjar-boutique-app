@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'suggestions_store.dart';
+import 'theme_store.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -14,6 +15,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'Stitching': [],
     'Fabric': [],
     'Work': [],
+    'Category': [],
   };
 
   @override
@@ -27,9 +29,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final st = await SuggestionsStore.getCustomStitching();
     final fb = await SuggestionsStore.getCustomFabric();
     final wk = await SuggestionsStore.getCustomWork();
+    final cat = await SuggestionsStore.getCustomCategories();
     if (!mounted) return;
     setState(() {
-      _custom = {'Product Name': pn, 'Stitching': st, 'Fabric': fb, 'Work': wk};
+      _custom = {'Product Name': pn, 'Stitching': st, 'Fabric': fb, 'Work': wk, 'Category': cat};
     });
   }
 
@@ -60,6 +63,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case 'Work':
         await SuggestionsStore.addWork(value);
         break;
+      case 'Category':
+        await SuggestionsStore.addCategory(value);
+        break;
     }
     _reload();
   }
@@ -77,6 +83,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         break;
       case 'Work':
         await SuggestionsStore.removeWork(value);
+        break;
+      case 'Category':
+        await SuggestionsStore.removeCategory(value);
         break;
     }
     _reload();
@@ -118,6 +127,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _themeSection() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Theme', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+          const SizedBox(height: 8),
+          ValueListenableBuilder<ThemeMode>(
+            valueListenable: ThemeStore.mode,
+            builder: (context, mode, _) {
+              return SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment(value: ThemeMode.light, label: Text('Light'), icon: Icon(Icons.light_mode)),
+                  ButtonSegment(value: ThemeMode.dark, label: Text('Dark'), icon: Icon(Icons.dark_mode)),
+                  ButtonSegment(value: ThemeMode.system, label: Text('Auto'), icon: Icon(Icons.brightness_auto)),
+                ],
+                selected: {mode},
+                onSelectionChanged: (s) => ThemeStore.set(s.first),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -125,12 +161,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          _themeSection(),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
           const Text(
             'Manage extra suggestions shown on the Product Details form. Default suggestions are always available and can\'t be removed here.',
             style: TextStyle(color: Colors.black54),
           ),
           const SizedBox(height: 16),
           _section('Product Name'),
+          _section('Category'),
           _section('Stitching'),
           _section('Fabric'),
           _section('Work'),
