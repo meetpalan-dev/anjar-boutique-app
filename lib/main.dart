@@ -99,7 +99,7 @@ class HomeScreen extends StatelessWidget {
             children: [
               const Icon(Icons.checkroom, size: 96, color: Color(0xFFB33A2E)),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Upload a product photo to create\na branded post + caption',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
