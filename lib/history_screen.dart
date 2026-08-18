@@ -134,10 +134,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _results.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Text('No posts found', style: TextStyle(color: Colors.black45)),
+                          padding: const EdgeInsets.all(24),
+                          child: Text('No posts found', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                         ),
                       )
                     : ListView.builder(
@@ -189,7 +189,7 @@ class PostDetailScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.black12),
+                border: Border.all(color: Theme.of(context).dividerColor),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: SelectableText(record.caption),

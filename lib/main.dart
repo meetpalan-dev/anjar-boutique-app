@@ -102,7 +102,7 @@ class HomeScreen extends StatelessWidget {
               const Text(
                 'Upload a product photo to create\na branded post + caption',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.black54),
+                style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 32),
               FilledButton.icon(
@@ -241,11 +241,11 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   bool _sizeNumberMode = false; // OFF = alphabet (spec default), ON = number
   bool _showMoreSizes = false;
 
-  List<String> _productNameSuggestions = SuggestionsStore.defaultProductNames;
-  List<String> _stitchingSuggestions = SuggestionsStore.defaultStitching;
-  List<String> _fabricSuggestions = SuggestionsStore.defaultFabric;
-  List<String> _workSuggestions = SuggestionsStore.defaultWork;
-  List<String> _categorySuggestions = SuggestionsStore.defaultCategories;
+  List<String> _productNameSuggestions = const [];
+  List<String> _stitchingSuggestions = const [];
+  List<String> _fabricSuggestions = const [];
+  List<String> _workSuggestions = const [];
+  List<String> _categorySuggestions = const [];
   String? _selectedCategory;
 
   // alpha size -> inch measurement, in canonical smallest-to-largest order
@@ -395,7 +395,7 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(primary, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-          Text(secondary, style: const TextStyle(fontSize: 10, color: Colors.black54)),
+          Text(secondary, style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
         ],
       ),
       selected: selected,
@@ -509,7 +509,7 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
             Row(
               children: [
                 Expanded(child: _sectionLabel('Size')),
-                const Text('Number', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                Text('Number', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 Switch(
                   value: _sizeNumberMode,
                   onChanged: (v) => setState(() => _sizeNumberMode = v),
@@ -517,12 +517,7 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
               ],
             ),
             _chipGrid(baseSizes.map(_sizeChip).toList()),
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 180),
-              crossFadeState: _showMoreSizes ? CrossFadeState.showFirst : CrossFadeState.showSecond,
-              firstChild: _chipGrid(moreSizes.map(_sizeChip).toList()),
-              secondChild: const SizedBox(width: double.infinity),
-            ),
+            if (_showMoreSizes) _chipGrid(moreSizes.map(_sizeChip).toList()),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -635,7 +630,6 @@ String buildCaption({
   }
 
   final fields = <String, String>{
-    'ID': id,
     'Category': category,
     'Product Name': productName,
     'Stitching': stitching,
@@ -643,6 +637,7 @@ String buildCaption({
     'Color': color,
     'Fabric': fabric,
     'Work': work,
+    'ID': id,
   };
   for (final entry in fields.entries) {
     if (entry.value.isNotEmpty) {
@@ -752,7 +747,7 @@ class _ResultScreenState extends State<ResultScreen> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
-                border: Border.all(color: Colors.black12),
+                border: Border.all(color: Theme.of(context).dividerColor),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: SelectableText(widget.caption),

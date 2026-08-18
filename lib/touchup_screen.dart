@@ -208,7 +208,7 @@ class _TouchUpScreenState extends State<TouchUpScreen> {
                     _mode == _BrushMode.erase
                         ? 'Brush over any background bits still showing — pinch to zoom'
                         : 'Brush to bring back anything erased by mistake — pinch to zoom',
-                    style: const TextStyle(color: Colors.black54),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
                 ),

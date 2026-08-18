@@ -1,46 +1,14 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Manages the default + user-added suggestion chips shown on the
-/// Product Details form. Custom additions persist across app restarts.
+/// Manages user-added suggestion chips shown on the Product Details form.
+/// There are no built-in defaults — only what the user explicitly adds in
+/// Settings appears here, and it persists across app restarts.
 class SuggestionsStore {
   static const _productNameKey = 'suggestions_product_name';
   static const _stitchingKey = 'suggestions_stitching';
   static const _fabricKey = 'suggestions_fabric';
   static const _workKey = 'suggestions_work';
   static const _categoryKey = 'suggestions_category';
-
-  static const List<String> defaultCategories = [
-    'Short Kurti',
-    'Kurti Set with Salwar',
-    'Kurti Set with Palazzos',
-    'Chaniya Choli',
-  ];
-
-  static const List<String> defaultProductNames = [
-    'Angrakha Kurti',
-    'Straight Kurti',
-    'Kurti with Salwar & With Dupatta',
-    'Kurti with Palazzos & With Dupatta',
-    'Lehenga With Choli & Dupatta',
-  ];
-
-  static const List<String> defaultStitching = [
-    'Unstitched',
-    'Fully Stitched',
-    'Semi Stitched',
-  ];
-
-  static const List<String> defaultFabric = [
-    'Cotton', 'Cotton Blend', 'Rayon', 'Silk', 'Gaji Silk', 'Organza',
-    'Chiffon', 'Georgette', 'Crepe', 'Velvet', 'Linen', 'Chanderi',
-    'Banarasi', 'Net', 'Satin',
-  ];
-
-  static const List<String> defaultWork = [
-    'Printed', 'Embroidery', 'Hand Embroidery', 'Thread Work',
-    'Mirror Work', 'Zari Work', 'Sequin Work', 'Aari Work',
-    'Foil Print', 'Block Print', 'Handwork', 'Embellished', 'Plain',
-  ];
 
   static Future<List<String>> _getCustom(String key) async {
     final prefs = await SharedPreferences.getInstance();
@@ -64,16 +32,11 @@ class SuggestionsStore {
     await prefs.setStringList(key, list);
   }
 
-  static Future<List<String>> getProductNames() async =>
-      [...defaultProductNames, ...await _getCustom(_productNameKey)];
-  static Future<List<String>> getStitching() async =>
-      [...defaultStitching, ...await _getCustom(_stitchingKey)];
-  static Future<List<String>> getFabric() async =>
-      [...defaultFabric, ...await _getCustom(_fabricKey)];
-  static Future<List<String>> getWork() async =>
-      [...defaultWork, ...await _getCustom(_workKey)];
-  static Future<List<String>> getCategories() async =>
-      [...defaultCategories, ...await _getCustom(_categoryKey)];
+  static Future<List<String>> getProductNames() => _getCustom(_productNameKey);
+  static Future<List<String>> getStitching() => _getCustom(_stitchingKey);
+  static Future<List<String>> getFabric() => _getCustom(_fabricKey);
+  static Future<List<String>> getWork() => _getCustom(_workKey);
+  static Future<List<String>> getCategories() => _getCustom(_categoryKey);
 
   static Future<List<String>> getCustomProductNames() => _getCustom(_productNameKey);
   static Future<List<String>> getCustomStitching() => _getCustom(_stitchingKey);

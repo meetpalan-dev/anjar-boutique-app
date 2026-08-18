@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'suggestions_store.dart';
+import 'suggestions_io.dart';
 import 'theme_store.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -111,10 +112,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           if (items.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 4),
-              child: Text('No custom suggestions added yet — defaults are always shown on the form.',
-                  style: TextStyle(color: Colors.black45, fontSize: 12)),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text('No suggestions added yet. Add one below — it\'ll show up on the Product Details form.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12)),
             )
           else
             Wrap(
@@ -164,9 +165,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _themeSection(),
           const Divider(height: 1),
           const SizedBox(height: 16),
-          const Text(
-            'Manage extra suggestions shown on the Product Details form. Default suggestions are always available and can\'t be removed here.',
-            style: TextStyle(color: Colors.black54),
+          Text(
+            'Suggestions shown on the Product Details form come only from what you add here — there are no built-in defaults.',
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
           _section('Product Name'),
@@ -174,6 +175,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _section('Stitching'),
           _section('Fabric'),
           _section('Work'),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => SuggestionsIO.export(),
+                  icon: const Icon(Icons.upload_file, size: 18),
+                  label: const Text('Export Suggestions'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final error = await SuggestionsIO.import();
+                    if (!context.mounted) return;
+                    if (error != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Suggestions imported')),
+                      );
+                      _reload();
+                    }
+                  },
+                  icon: const Icon(Icons.download, size: 18),
+                  label: const Text('Import Suggestions'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

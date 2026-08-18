@@ -158,7 +158,7 @@ class _PositioningScreenState extends State<PositioningScreen> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: selected ? const Color(0xFFB33A2E) : Colors.black12,
+                                color: selected ? const Color(0xFFB33A2E) : Theme.of(context).dividerColor,
                                 width: selected ? 2.5 : 1,
                               ),
                             ),
@@ -204,9 +204,9 @@ class _PositioningScreenState extends State<PositioningScreen> {
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text('Drag to move, pinch to resize', style: TextStyle(color: Colors.black54)),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text('Drag to move, pinch to resize', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
