@@ -1,54 +1,47 @@
 name: Build APK
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch: {}
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Download background-removal model
         run: |
           mkdir -p assets/models
           curl -L -o assets/models/u2net.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx
-
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-
       - name: Scaffold Android platform files
         run: flutter create . --platforms=android --org com.anjarboutique --project-name anjar_boutique_bot
-
       - name: Bump Android compileSdk
         run: |
           sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
-
       - name: Install dependencies
         run: flutter pub get
-
-      - name: Patch onnxruntime plugin's own compileSdk
+      - name: Patch plugin compileSdk versions
         run: |
-          PLUGIN_DIR=$(find ~/.pub-cache -maxdepth 3 -type d -iname "onnxruntime-*" | head -n 1)
-          echo "Found onnxruntime package at: $PLUGIN_DIR"
-          echo "----- before patch -----"
-          find "$PLUGIN_DIR/android" -name "build.gradle*" -exec cat {} \;
-          find "$PLUGIN_DIR/android" -name "build.gradle*" | xargs sed -i \
-            -e 's/compileSdkVersion [0-9]\+/compileSdkVersion 36/' \
-            -e 's/compileSdk = [0-9]\+/compileSdk = 36/' \
-            -e 's/compileSdk [0-9]\+/compileSdk 36/'
-          echo "----- after patch -----"
-          find "$PLUGIN_DIR/android" -name "build.gradle*" -exec cat {} \;
-
+          for PLUGIN_NAME in "onnxruntime" "file_picker"; do
+            PLUGIN_DIR=$(find ~/.pub-cache -maxdepth 3 -type d -iname "${PLUGIN_NAME}-*" | head -n 1)
+            if [ -z "$PLUGIN_DIR" ]; then
+              echo "Skipping $PLUGIN_NAME — not found in pub-cache"
+              continue
+            fi
+            echo "Found $PLUGIN_NAME at: $PLUGIN_DIR"
+            find "$PLUGIN_DIR/android" -name "build.gradle*" | xargs sed -i \
+              -e 's/compileSdkVersion [0-9]\+/compileSdkVersion 36/' \
+              -e 's/compileSdk = [0-9]\+/compileSdk = 36/' \
+              -e 's/compileSdk [0-9]\+/compileSdk 36/'
+          done
+      - name: Generate app icons
+        run: dart run flutter_launcher_icons
       - name: Build release APK
         run: flutter build apk --release
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: anjar-boutique-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          
