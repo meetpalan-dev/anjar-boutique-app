@@ -14,6 +14,7 @@ import 'settings_screen.dart';
 import 'suggestions_store.dart';
 import 'theme_store.dart';
 import 'post_history_store.dart';
+import 'product_id_store.dart';
 import 'history_screen.dart';
 
 void main() async {
@@ -235,6 +236,9 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   final workCtrl = TextEditingController();
   final colorExtraCtrl = TextEditingController();
   final extraCtrl = TextEditingController();
+  final costPriceCtrl = TextEditingController();
+  final sellingPriceCtrl = TextEditingController();
+  final discountPriceCtrl = TextEditingController();
 
   final Set<String> _selectedSizeAlphas = {};
   final Set<String> _selectedColors = {};
@@ -247,6 +251,12 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   List<String> _workSuggestions = const [];
   List<String> _categorySuggestions = const [];
   String? _selectedCategory;
+
+  // Parent product: null = "New Product" (fresh parent ID generated on
+  // submit); otherwise the parentId of an existing product this is a new
+  // color/variant of.
+  List<ParentProductSummary> _existingParents = const [];
+  String? _selectedParentId;
 
   // alpha size -> inch measurement, in canonical smallest-to-largest order
   static const List<MapEntry<String, int>> _sizeMap = [
@@ -283,6 +293,13 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   void initState() {
     super.initState();
     _loadSuggestions();
+    _loadExistingParents();
+  }
+
+  Future<void> _loadExistingParents() async {
+    final parents = await ProductIdStore.getExistingParents();
+    if (!mounted) return;
+    setState(() => _existingParents = parents);
   }
 
   Future<void> _loadSuggestions() async {
@@ -311,15 +328,19 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     workCtrl.dispose();
     colorExtraCtrl.dispose();
     extraCtrl.dispose();
+    costPriceCtrl.dispose();
+    sellingPriceCtrl.dispose();
+    discountPriceCtrl.dispose();
     super.dispose();
   }
 
-  Widget _field(TextEditingController ctrl, String label, {int maxLines = 1}) {
+  Widget _field(TextEditingController ctrl, String label, {int maxLines = 1, TextInputType? keyboardType}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: ctrl,
         maxLines: maxLines,
+        keyboardType: keyboardType,
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
@@ -427,10 +448,16 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
     return parts.join(', ');
   }
 
-  void _generate() {
-    final id = PostHistoryStore.generateId();
+  Future<void> _generate() async {
     final category = _selectedCategory ?? '';
     final productName = productNameCtrl.text.trim();
+
+    final parentId = _selectedParentId ?? await ProductIdStore.generateParentId();
+    final primaryColor = _selectedColors.isNotEmpty ? _selectedColors.first : null;
+    final suffix = ProductIdStore.suffixFromColor(primaryColor);
+    final id = await ProductIdStore.makeUniqueVariantId(parentId, suffix);
+
+    final hashtags = _buildHashtags(productName);
     final caption = buildCaption(
       id: id,
       category: category,
@@ -443,6 +470,14 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
       work: workCtrl.text.trim(),
       extra: extraCtrl.text.trim(),
     );
+
+    double? parseMoney(String s) {
+      final t = s.trim();
+      if (t.isEmpty) return null;
+      return double.tryParse(t);
+    }
+
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -450,8 +485,20 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
           composited: widget.composited,
           caption: caption,
           id: id,
+          parentId: parentId,
           category: category,
           productName: productName,
+          description: descriptionCtrl.text.trim(),
+          size: _computedSize,
+          color: _computedColor,
+          stitching: stitchingCtrl.text.trim(),
+          fabric: fabricCtrl.text.trim(),
+          work: workCtrl.text.trim(),
+          extraNote: extraCtrl.text.trim(),
+          hashtags: hashtags,
+          costPrice: parseMoney(costPriceCtrl.text),
+          sellingPrice: parseMoney(sellingPriceCtrl.text),
+          discountPrice: parseMoney(discountPriceCtrl.text),
         ),
       ),
     );
@@ -502,6 +549,39 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
               }).toList(),
             ),
             const SizedBox(height: 12),
+
+            if (_existingParents.isNotEmpty) ...[
+              _sectionLabel('Product'),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ChoiceChip(
+                    label: const Text('New Product', style: TextStyle(fontSize: 12.5)),
+                    selected: _selectedParentId == null,
+                    onSelected: (_) => setState(() => _selectedParentId = null),
+                  ),
+                  ..._existingParents.map((p) {
+                    final selected = _selectedParentId == p.parentId;
+                    final label = p.productName.isEmpty ? p.parentId : '${p.productName} (${p.parentId})';
+                    return ChoiceChip(
+                      label: Text(label, style: const TextStyle(fontSize: 12.5)),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _selectedParentId = p.parentId),
+                    );
+                  }),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _selectedParentId == null
+                    ? 'A new Product ID will be generated for this.'
+                    : 'This will be saved as a new color/variant of $_selectedParentId.',
+                style: TextStyle(fontSize: 11.5, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 12),
+            ],
+
             _field(descriptionCtrl, 'Description (festive hook line)', maxLines: 2),
             _suggestionField(productNameCtrl, 'Product Name', _productNameSuggestions),
 
@@ -550,6 +630,35 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
             _suggestionField(fabricCtrl, 'Fabric', _fabricSuggestions),
             _suggestionField(workCtrl, 'Work', _workSuggestions),
             _field(extraCtrl, 'Extra note (optional)', maxLines: 2),
+
+            _divider(),
+            _groupLabel('Pricing (internal only — never appears in the caption)'),
+            Row(
+              children: [
+                Expanded(child: _field(costPriceCtrl, 'Cost Price (₹)', keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+                const SizedBox(width: 8),
+                Expanded(child: _field(sellingPriceCtrl, 'Selling Price (₹)', keyboardType: const TextInputType.numberWithOptions(decimal: true))),
+              ],
+            ),
+            _field(discountPriceCtrl, 'Discount Price (₹) — optional', keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+            AnimatedBuilder(
+              animation: Listenable.merge([costPriceCtrl, sellingPriceCtrl, discountPriceCtrl]),
+              builder: (context, _) {
+                final cost = double.tryParse(costPriceCtrl.text.trim());
+                final selling = double.tryParse(sellingPriceCtrl.text.trim());
+                final discount = double.tryParse(discountPriceCtrl.text.trim());
+                final base = discount ?? selling;
+                if (cost == null || base == null) return const SizedBox.shrink();
+                final profit = base - cost;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    '${discount != null ? "Actual " : ""}Profit: ₹${profit.toStringAsFixed(0)}',
+                    style: TextStyle(fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.primary),
+                  ),
+                );
+              },
+            ),
 
             const SizedBox(height: 8),
             FilledButton.icon(
@@ -665,16 +774,40 @@ class ResultScreen extends StatefulWidget {
   final Uint8List composited;
   final String caption;
   final String id;
+  final String parentId;
   final String category;
   final String productName;
+  final String description;
+  final String size;
+  final String color;
+  final String stitching;
+  final String fabric;
+  final String work;
+  final String extraNote;
+  final List<String> hashtags;
+  final double? costPrice;
+  final double? sellingPrice;
+  final double? discountPrice;
 
   const ResultScreen({
     super.key,
     required this.composited,
     required this.caption,
     required this.id,
+    required this.parentId,
     required this.category,
     required this.productName,
+    required this.description,
+    required this.size,
+    required this.color,
+    required this.stitching,
+    required this.fabric,
+    required this.work,
+    required this.extraNote,
+    required this.hashtags,
+    this.costPrice,
+    this.sellingPrice,
+    this.discountPrice,
   });
 
   @override
@@ -690,19 +823,40 @@ class _ResultScreenState extends State<ResultScreen> {
     // the user from copying/sharing the caption they already have.
     PostHistoryStore.save(
       id: widget.id,
+      parentId: widget.parentId,
       imageBytes: widget.composited,
       caption: widget.caption,
+      hashtags: widget.hashtags,
       category: widget.category,
       productName: widget.productName,
+      description: widget.description,
+      size: widget.size,
+      color: widget.color,
+      stitching: widget.stitching,
+      fabric: widget.fabric,
+      work: widget.work,
+      extraNote: widget.extraNote,
+      costPrice: widget.costPrice,
+      sellingPrice: widget.sellingPrice,
+      discountPrice: widget.discountPrice,
     ).catchError((_) {
       // Best-effort — the generated post is still usable even if saving
       // to history fails (e.g. disk space).
       return PostRecord(
         id: widget.id,
+        parentId: widget.parentId,
         createdAt: DateTime.now(),
         category: widget.category,
         productName: widget.productName,
+        description: widget.description,
+        size: widget.size,
+        color: widget.color,
+        stitching: widget.stitching,
+        fabric: widget.fabric,
+        work: widget.work,
+        extraNote: widget.extraNote,
         caption: widget.caption,
+        hashtags: widget.hashtags,
         imagePath: '',
       );
     });

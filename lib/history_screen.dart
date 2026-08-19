@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'post_history_store.dart';
 import 'suggestions_store.dart';
+import 'history_io.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -69,10 +70,53 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   String _formatDate(DateTime d) => '${d.day}/${d.month}/${d.year}';
 
+  Future<void> _confirmDelete(PostRecord r) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this product?'),
+        content: const Text('This will remove the product from Post History.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await PostHistoryStore.delete(r.id);
+      _runSearch();
+    }
+  }
+
+  Future<void> _import() async {
+    final message = await HistoryIO.import();
+    if (message.isEmpty) return; // cancelled
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    _runSearch();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Post History')),
+      appBar: AppBar(
+        title: const Text('Post History'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.upload_file),
+            tooltip: 'Export',
+            onPressed: () => HistoryIO.export(),
+          ),
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'Import',
+            onPressed: _import,
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
@@ -144,6 +188,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         itemCount: _results.length,
                         itemBuilder: (context, i) {
                           final r = _results[i];
+                          final priceLabel = r.sellingPrice != null ? '₹${r.sellingPrice!.toStringAsFixed(0)}' : null;
                           return ListTile(
                             leading: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
@@ -152,7 +197,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   : const SizedBox(width: 48, height: 48),
                             ),
                             title: Text(r.productName.isEmpty ? '(no name)' : r.productName),
-                            subtitle: Text('${r.id} · ${r.category} · ${_formatDate(r.createdAt)}'),
+                            subtitle: Text(
+                              '${r.parentId} · ${r.color.isEmpty ? r.category : r.color}\n'
+                              '${priceLabel != null ? '$priceLabel · ' : ''}${_formatDate(r.createdAt)}',
+                            ),
+                            isThreeLine: true,
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline),
+                              tooltip: 'Delete',
+                              onPressed: () => _confirmDelete(r),
+                            ),
                             onTap: () {
                               Navigator.push(context, MaterialPageRoute(builder: (_) => PostDetailScreen(record: r)));
                             },
@@ -173,6 +227,7 @@ class PostDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final file = File(record.imagePath);
+    final profit = record.profit;
     return Scaffold(
       appBar: AppBar(title: Text(record.id)),
       body: SingleChildScrollView(
@@ -186,6 +241,33 @@ class PostDetailScreen extends StatelessWidget {
                 child: Image.file(file),
               ),
             const SizedBox(height: 16),
+            if (record.costPrice != null || record.sellingPrice != null || record.discountPrice != null)
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Pricing (internal only)', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    if (record.costPrice != null) Text('Cost Price: ₹${record.costPrice!.toStringAsFixed(0)}'),
+                    if (record.sellingPrice != null) Text('Selling Price: ₹${record.sellingPrice!.toStringAsFixed(0)}'),
+                    if (record.discountPrice != null) Text('Discount Price: ₹${record.discountPrice!.toStringAsFixed(0)}'),
+                    if (profit != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Profit: ₹${profit.toStringAsFixed(0)}',
+                          style: TextStyle(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.primary),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
