@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'post_history_store.dart';
 import 'suggestions_store.dart';
 import 'history_io.dart';
+import 'product_id_store.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -86,7 +87,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
     if (confirmed == true) {
-      await PostHistoryStore.delete(r.id);
+      await PostHistoryStore.softDelete(r.id);
       _runSearch();
     }
   }
@@ -228,6 +229,7 @@ class PostDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final file = File(record.imagePath);
     final profit = record.profit;
+    final productDisplayName = record.productName.isEmpty ? record.parentId : record.productName;
     return Scaffold(
       appBar: AppBar(title: Text(record.id)),
       body: SingleChildScrollView(
@@ -302,6 +304,16 @@ class PostDetailScreen extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                PendingParentSelection.parentId = record.parentId;
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              },
+              icon: const Icon(Icons.add_a_photo_outlined),
+              label: Text('Create New Post for $productDisplayName'),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 46)),
             ),
           ],
         ),

@@ -97,9 +97,27 @@ class PostRecord {
       );
 }
 
-/// Stores every generated post as: one PNG file per post, plus a single
-/// JSON index file listing all of them. No database plugin needed — plain
-/// files via path_provider (already a dependency).
+/// A soft-deleted post — the full record plus when it was deleted. Nothing
+/// (image, ID, pricing, metadata) is destroyed until Delete Permanently.
+class DeletedPostRecord {
+  final PostRecord record;
+  final DateTime deletedAt;
+  const DeletedPostRecord({required this.record, required this.deletedAt});
+
+  Map<String, dynamic> toJson() => {
+        ...record.toJson(),
+        'deletedAt': deletedAt.toIso8601String(),
+      };
+
+  factory DeletedPostRecord.fromJson(Map<String, dynamic> j) => DeletedPostRecord(
+        record: PostRecord.fromJson(j),
+        deletedAt: DateTime.parse(j['deletedAt'] as String? ?? DateTime.now().toIso8601String()),
+      );
+}
+
+/// Stores every generated post as: one PNG file per post, plus JSON index
+/// files listing active and soft-deleted posts. No database plugin needed —
+/// plain files via path_provider (already a dependency).
 class PostHistoryStore {
   static Future<Directory> _postsDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -113,8 +131,18 @@ class PostHistoryStore {
     return File('${docs.path}/posts_index.json');
   }
 
+  static Future<File> _deletedIndexFile() async {
+    final docs = await getApplicationDocumentsDirectory();
+    return File('${docs.path}/posts_deleted_index.json');
+  }
+
   static Future<void> _writeAll(List<PostRecord> chronologicalAscending) async {
     final f = await _indexFile();
+    await f.writeAsString(jsonEncode(chronologicalAscending.map((r) => r.toJson()).toList()));
+  }
+
+  static Future<void> _writeAllDeleted(List<DeletedPostRecord> chronologicalAscending) async {
+    final f = await _deletedIndexFile();
     await f.writeAsString(jsonEncode(chronologicalAscending.map((r) => r.toJson()).toList()));
   }
 
@@ -177,6 +205,14 @@ class PostHistoryStore {
     return raw.map(PostRecord.fromJson).toList().reversed.toList();
   }
 
+  /// Newest-deleted first.
+  static Future<List<DeletedPostRecord>> getDeleted() async {
+    final f = await _deletedIndexFile();
+    if (!await f.exists()) return [];
+    final raw = (jsonDecode(await f.readAsString()) as List).cast<Map<String, dynamic>>();
+    return raw.map(DeletedPostRecord.fromJson).toList().reversed.toList();
+  }
+
   static Future<List<PostRecord>> search({String? query, String? category, DateTime? date}) async {
     final all = await getAll();
     return all.where((r) {
@@ -197,8 +233,9 @@ class PostHistoryStore {
     }).toList();
   }
 
-  /// Permanently removes a post (and its saved image) from history.
-  static Future<void> delete(String id) async {
+  /// Moves a post to Recently Deleted rather than destroying it. All data
+  /// (image, IDs, pricing, metadata) stays intact until Delete Permanently.
+  static Future<void> softDelete(String id) async {
     final all = await getAll(); // newest first
     PostRecord? target;
     for (final r in all) {
@@ -207,11 +244,56 @@ class PostHistoryStore {
         break;
       }
     }
+    if (target == null) return;
+
     final remaining = all.where((r) => r.id != id).toList();
     await _writeAll(remaining.reversed.toList());
-    if (target != null && target.imagePath.isNotEmpty) {
+
+    final deletedExisting = await getDeleted(); // newest-deleted first
+    final deletedAscending = deletedExisting.reversed.toList();
+    deletedAscending.add(DeletedPostRecord(record: target, deletedAt: DateTime.now()));
+    await _writeAllDeleted(deletedAscending);
+  }
+
+  /// Restores a soft-deleted post back to Post History with its exact
+  /// original Product ID and Variant ID.
+  static Future<void> restore(String id) async {
+    final deleted = await getDeleted(); // newest-deleted first
+    DeletedPostRecord? target;
+    for (final d in deleted) {
+      if (d.record.id == id) {
+        target = d;
+        break;
+      }
+    }
+    if (target == null) return;
+
+    final remainingDeleted = deleted.where((d) => d.record.id != id).toList();
+    await _writeAllDeleted(remainingDeleted.reversed.toList());
+
+    final existing = await getAll(); // newest first
+    final ascending = existing.reversed.toList();
+    ascending.add(target.record);
+    await _writeAll(ascending);
+  }
+
+  /// Permanently removes a soft-deleted post — the image file and its
+  /// entry in Recently Deleted, with no way back.
+  static Future<void> deletePermanently(String id) async {
+    final deleted = await getDeleted(); // newest-deleted first
+    DeletedPostRecord? target;
+    for (final d in deleted) {
+      if (d.record.id == id) {
+        target = d;
+        break;
+      }
+    }
+    final remaining = deleted.where((d) => d.record.id != id).toList();
+    await _writeAllDeleted(remaining.reversed.toList());
+
+    if (target != null && target.record.imagePath.isNotEmpty) {
       try {
-        final f = File(target.imagePath);
+        final f = File(target.record.imagePath);
         if (await f.exists()) await f.delete();
       } catch (_) {
         // best-effort — an orphaned image file isn't worth failing the delete over

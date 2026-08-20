@@ -299,7 +299,11 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
   Future<void> _loadExistingParents() async {
     final parents = await ProductIdStore.getExistingParents();
     if (!mounted) return;
-    setState(() => _existingParents = parents);
+    setState(() {
+      _existingParents = parents;
+      final pending = PendingParentSelection.consume();
+      if (pending != null) _selectedParentId = pending;
+    });
   }
 
   Future<void> _loadSuggestions() async {
@@ -518,14 +522,96 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
       );
 
   Widget _divider() => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 18),
+        padding: const EdgeInsets.symmetric(vertical: 14),
         child: Divider(height: 1, color: Theme.of(context).dividerColor.withValues(alpha: 0.5)),
       );
+
+  void _openExistingProductPicker() {
+    final searchCtrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final query = searchCtrl.text.trim().toLowerCase();
+            final results = query.isEmpty
+                ? _existingParents
+                : _existingParents.where((p) {
+                    return p.parentId.toLowerCase().contains(query) ||
+                        p.productName.toLowerCase().contains(query) ||
+                        p.category.toLowerCase().contains(query);
+                  }).toList();
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+              child: SafeArea(
+                child: SizedBox(
+                  height: MediaQuery.of(sheetContext).size.height * 0.75,
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                        child: TextField(
+                          controller: searchCtrl,
+                          autofocus: true,
+                          onChanged: (_) => setSheetState(() {}),
+                          decoration: const InputDecoration(
+                            hintText: 'Search by Product ID, name, or category',
+                            prefixIcon: Icon(Icons.search),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: results.isEmpty
+                            ? const Center(child: Text('No matching products'))
+                            : ListView.builder(
+                                itemCount: results.length,
+                                itemBuilder: (context, i) {
+                                  final p = results[i];
+                                  final file = File(p.imagePath);
+                                  return ListTile(
+                                    leading: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: file.existsSync()
+                                          ? Image.file(file, width: 48, height: 48, fit: BoxFit.cover)
+                                          : Container(
+                                              width: 48,
+                                              height: 48,
+                                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                              child: const Icon(Icons.image_not_supported, size: 20),
+                                            ),
+                                    ),
+                                    title: Text(p.productName.isEmpty ? '(no name)' : p.productName),
+                                    subtitle: Text(
+                                      [
+                                        p.parentId,
+                                        if (p.category.isNotEmpty) p.category,
+                                        if (p.colors.isNotEmpty) p.colors.join(', '),
+                                      ].join(' · '),
+                                    ),
+                                    onTap: () {
+                                      setState(() => _selectedParentId = p.parentId);
+                                      Navigator.pop(sheetContext);
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final baseSizes = _sizeMap.where((e) => !_hiddenByDefault.contains(e.key)).toList();
-    final moreSizes = _sizeMap.where((e) => _hiddenByDefault.contains(e.key)).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Product Details')),
@@ -552,24 +638,31 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
 
             if (_existingParents.isNotEmpty) ...[
               _sectionLabel('Product'),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
+              Row(
                 children: [
-                  ChoiceChip(
-                    label: const Text('New Product', style: TextStyle(fontSize: 12.5)),
-                    selected: _selectedParentId == null,
-                    onSelected: (_) => setState(() => _selectedParentId = null),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => setState(() => _selectedParentId = null),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: _selectedParentId == null
+                            ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4)
+                            : null,
+                      ),
+                      child: const Text('New Product', style: TextStyle(fontSize: 12.5)),
+                    ),
                   ),
-                  ..._existingParents.map((p) {
-                    final selected = _selectedParentId == p.parentId;
-                    final label = p.productName.isEmpty ? p.parentId : '${p.productName} (${p.parentId})';
-                    return ChoiceChip(
-                      label: Text(label, style: const TextStyle(fontSize: 12.5)),
-                      selected: selected,
-                      onSelected: (_) => setState(() => _selectedParentId = p.parentId),
-                    );
-                  }),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _openExistingProductPicker,
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: _selectedParentId != null
+                            ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4)
+                            : null,
+                      ),
+                      child: const Text('Existing Product', style: TextStyle(fontSize: 12.5)),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 4),
@@ -596,8 +689,10 @@ class _DetailsFormScreenState extends State<DetailsFormScreen> {
                 ),
               ],
             ),
-            _chipGrid(baseSizes.map(_sizeChip).toList()),
-            if (_showMoreSizes) _chipGrid(moreSizes.map(_sizeChip).toList()),
+            if (_showMoreSizes)
+              _chipGrid(_sizeMap.map(_sizeChip).toList())
+            else
+              _chipGrid(baseSizes.map(_sizeChip).toList()),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
@@ -815,52 +910,8 @@ class ResultScreen extends StatefulWidget {
 }
 
 class _ResultScreenState extends State<ResultScreen> {
-  @override
-  void initState() {
-    super.initState();
-    // Auto-save to history as soon as a post is generated — no separate
-    // "Save" step needed. Fire-and-forget: a save failure shouldn't block
-    // the user from copying/sharing the caption they already have.
-    PostHistoryStore.save(
-      id: widget.id,
-      parentId: widget.parentId,
-      imageBytes: widget.composited,
-      caption: widget.caption,
-      hashtags: widget.hashtags,
-      category: widget.category,
-      productName: widget.productName,
-      description: widget.description,
-      size: widget.size,
-      color: widget.color,
-      stitching: widget.stitching,
-      fabric: widget.fabric,
-      work: widget.work,
-      extraNote: widget.extraNote,
-      costPrice: widget.costPrice,
-      sellingPrice: widget.sellingPrice,
-      discountPrice: widget.discountPrice,
-    ).catchError((_) {
-      // Best-effort — the generated post is still usable even if saving
-      // to history fails (e.g. disk space).
-      return PostRecord(
-        id: widget.id,
-        parentId: widget.parentId,
-        createdAt: DateTime.now(),
-        category: widget.category,
-        productName: widget.productName,
-        description: widget.description,
-        size: widget.size,
-        color: widget.color,
-        stitching: widget.stitching,
-        fabric: widget.fabric,
-        work: widget.work,
-        extraNote: widget.extraNote,
-        caption: widget.caption,
-        hashtags: widget.hashtags,
-        imagePath: '',
-      );
-    });
-  }
+  bool _saving = false;
+  bool _done = false;
 
   Future<File> _saveTempImage() async {
     final dir = await getTemporaryDirectory();
@@ -883,50 +934,106 @@ class _ResultScreenState extends State<ResultScreen> {
     await Share.shareXFiles([XFile(file.path)], text: widget.caption);
   }
 
+  /// The one, single completion action: this is the only place a post
+  /// actually gets written to Post History. Backing out of this screen
+  /// without pressing Done leaves no record behind.
+  Future<void> _tapDone() async {
+    setState(() => _saving = true);
+    try {
+      await PostHistoryStore.save(
+        id: widget.id,
+        parentId: widget.parentId,
+        imageBytes: widget.composited,
+        caption: widget.caption,
+        hashtags: widget.hashtags,
+        category: widget.category,
+        productName: widget.productName,
+        description: widget.description,
+        size: widget.size,
+        color: widget.color,
+        stitching: widget.stitching,
+        fabric: widget.fabric,
+        work: widget.work,
+        extraNote: widget.extraNote,
+        costPrice: widget.costPrice,
+        sellingPrice: widget.sellingPrice,
+        discountPrice: widget.discountPrice,
+      );
+      _done = true;
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save this post: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Ready to Post')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.memory(widget.composited),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        // Backing out without Done is allowed, and intentionally leaves no
+        // Post History record — nothing to do here, just don't save.
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Ready to Post')),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(widget.composited),
               ),
-              child: SelectableText(widget.caption),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _copyCaption(context),
-                    icon: const Icon(Icons.copy),
-                    label: const Text('Copy Caption'),
-                  ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => _share(context),
-                    icon: const Icon(Icons.share),
-                    label: const Text('Share'),
+                child: SelectableText(widget.caption),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _copyCaption(context),
+                      icon: const Icon(Icons.copy),
+                      label: const Text('Copy Caption'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _share(context),
+                      icon: const Icon(Icons.share),
+                      label: const Text('Share'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _saving || _done ? null : _tapDone,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_saving ? 'Saving…' : 'Done'),
+                style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+              ),
+            ],
+          ),
         ),
       ),
     );

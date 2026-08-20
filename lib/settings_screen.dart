@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'suggestions_store.dart';
 import 'suggestions_io.dart';
 import 'theme_store.dart';
+import 'post_history_store.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -18,11 +20,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'Work': [],
     'Category': [],
   };
+  List<DeletedPostRecord> _deleted = [];
 
   @override
   void initState() {
     super.initState();
     _reload();
+    _reloadDeleted();
+  }
+
+  Future<void> _reloadDeleted() async {
+    final d = await PostHistoryStore.getDeleted();
+    if (!mounted) return;
+    setState(() => _deleted = d);
+  }
+
+  Future<void> _restore(String id) async {
+    await PostHistoryStore.restore(id);
+    _reloadDeleted();
+  }
+
+  Future<void> _deletePermanently(String id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete permanently?'),
+        content: const Text('This cannot be undone — the product and its image will be gone for good.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete Permanently', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await PostHistoryStore.deletePermanently(id);
+      _reloadDeleted();
+    }
   }
 
   Future<void> _reload() async {
@@ -90,6 +126,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
         break;
     }
     _reload();
+  }
+
+  Widget _recentlyDeletedSection() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Recently Deleted', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+          const SizedBox(height: 8),
+          if (_deleted.isEmpty)
+            Text(
+              'Nothing here right now.',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
+            )
+          else
+            ..._deleted.map((d) {
+              final r = d.record;
+              final file = File(r.imagePath);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: file.existsSync()
+                          ? Image.file(file, width: 40, height: 40, fit: BoxFit.cover)
+                          : const SizedBox(width: 40, height: 40),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(r.productName.isEmpty ? '(no name)' : r.productName, style: const TextStyle(fontSize: 13)),
+                          Text(
+                            '${r.id} · deleted ${d.deletedAt.day}/${d.deletedAt.month}/${d.deletedAt.year}',
+                            style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.restore, size: 20),
+                      tooltip: 'Restore',
+                      onPressed: () => _restore(r.id),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.delete_forever, size: 20, color: Theme.of(context).colorScheme.error),
+                      tooltip: 'Delete Permanently',
+                      onPressed: () => _deletePermanently(r.id),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
   }
 
   Widget _section(String category) {
@@ -175,6 +270,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _section('Stitching'),
           _section('Fabric'),
           _section('Work'),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+          _recentlyDeletedSection(),
           const Divider(height: 1),
           const SizedBox(height: 16),
           Row(

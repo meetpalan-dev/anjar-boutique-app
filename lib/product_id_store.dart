@@ -38,21 +38,61 @@ class ProductIdStore {
 
   /// All distinct parent products already in history, newest first —
   /// used to populate the "add a variant to an existing product" picker.
+  /// Each summary uses its most recent post as the representative
+  /// thumbnail/category, and collects every color seen across its variants.
   static Future<List<ParentProductSummary>> getExistingParents() async {
     final all = await PostHistoryStore.getAll(); // newest first
-    final seen = <String>{};
-    final summaries = <ParentProductSummary>[];
+    final order = <String>[]; // first-seen order = most recent post per parent
+    final representative = <String, PostRecord>{};
+    final colorsByParent = <String, Set<String>>{};
+
     for (final r in all) {
-      if (r.parentId.isEmpty || seen.contains(r.parentId)) continue;
-      seen.add(r.parentId);
-      summaries.add(ParentProductSummary(parentId: r.parentId, productName: r.productName));
+      if (r.parentId.isEmpty) continue;
+      if (!representative.containsKey(r.parentId)) {
+        representative[r.parentId] = r;
+        order.add(r.parentId);
+      }
+      if (r.color.isNotEmpty) {
+        colorsByParent.putIfAbsent(r.parentId, () => {}).add(r.color);
+      }
     }
-    return summaries;
+
+    return order.map((parentId) {
+      final rep = representative[parentId]!;
+      return ParentProductSummary(
+        parentId: parentId,
+        productName: rep.productName,
+        category: rep.category,
+        imagePath: rep.imagePath,
+        colors: (colorsByParent[parentId] ?? {}).toList(),
+      );
+    }).toList();
   }
 }
 
 class ParentProductSummary {
   final String parentId;
   final String productName;
-  const ParentProductSummary({required this.parentId, required this.productName});
+  final String category;
+  final String imagePath;
+  final List<String> colors;
+  const ParentProductSummary({
+    required this.parentId,
+    required this.productName,
+    required this.category,
+    required this.imagePath,
+    required this.colors,
+  });
+}
+
+/// A one-shot handoff: "Create New Post" on an existing product sets this,
+/// then returns to Home so the user can pick a new photo. Product Details
+/// checks it once on load and applies it as the pre-selected parent product.
+class PendingParentSelection {
+  static String? parentId;
+  static String? consume() {
+    final v = parentId;
+    parentId = null;
+    return v;
+  }
 }
