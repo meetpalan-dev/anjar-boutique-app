@@ -100,8 +100,13 @@ class BackgroundRemover {
       interpolation: img.Interpolation.linear,
     );
 
-    final result = img.Image.from(photo);
-    result.convert(numChannels: 4);
+    // IMPORTANT: convert() returns a *new* image rather than mutating in
+    // place — it must be reassigned, or the result silently keeps whatever
+    // channel count `photo` started with (usually 3, no alpha), which means
+    // every pixel below gets its alpha argument thrown away and the cutout
+    // stays fully opaque no matter what the mask says.
+    var result = img.Image.from(photo);
+    result = result.convert(numChannels: 4);
     for (var y = 0; y < result.height; y++) {
       for (var x = 0; x < result.width; x++) {
         final p = result.getPixel(x, y);
@@ -111,6 +116,21 @@ class BackgroundRemover {
     }
 
     return result;
+  }
+
+  /// Fraction of pixels (0..1) whose alpha is above a "clearly foreground"
+  /// threshold. Used right after cutout to catch a failed/near-blank mask
+  /// (e.g. a busy or low-contrast background the model couldn't separate)
+  /// before it silently turns into an empty product photo later on.
+  static double foregroundCoverage(img.Image cutout) {
+    var count = 0;
+    final total = cutout.width * cutout.height;
+    for (var y = 0; y < cutout.height; y++) {
+      for (var x = 0; x < cutout.width; x++) {
+        if (cutout.getPixel(x, y).a > 40) count++;
+      }
+    }
+    return total == 0 ? 0 : count / total;
   }
 
   static List<double> _flatten(dynamic nested) {

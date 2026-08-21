@@ -106,12 +106,25 @@ class _PositioningScreenState extends State<PositioningScreen> {
         widget.cutout,
         width: scaledW,
         height: scaledH,
-        interpolation: img.Interpolation.average,
+        // average is a box filter meant for shrinking; use it only when
+        // actually downscaling, otherwise cubic gives correct upscaling.
+        interpolation: _cutoutScale < 1.0 ? img.Interpolation.average : img.Interpolation.cubic,
       );
 
       final pasteX = (_cutoutCenter.dx - scaledW / 2).round();
       final pasteY = (_cutoutCenter.dy - scaledH / 2).round();
-      img.compositeImage(canvas, resizedCutout, dstX: pasteX, dstY: pasteY);
+      // Pass dstW/dstH explicitly — compositeImage's own defaults silently
+      // clamp to min(dst, src) dimensions, which is the wrong behavior when
+      // a cutout partially overhangs the canvas edge and should instead be
+      // clipped by position, not resampled down to fit.
+      img.compositeImage(
+        canvas,
+        resizedCutout,
+        dstX: pasteX,
+        dstY: pasteY,
+        dstW: resizedCutout.width,
+        dstH: resizedCutout.height,
+      );
 
       final composited = Uint8List.fromList(img.encodePng(canvas));
       if (!mounted) return;

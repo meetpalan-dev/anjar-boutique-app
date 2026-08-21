@@ -169,6 +169,26 @@ class _BgRemovalScreenState extends State<BgRemovalScreen> {
       final cutout = await BackgroundRemover.cutout(photo);
       if (!mounted) return;
 
+      final coverage = BackgroundRemover.foregroundCoverage(cutout);
+      if (coverage < 0.03) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Cutout looks nearly empty'),
+            content: const Text(
+              'The background removal barely found any foreground in this '
+              'photo — the product may end up invisible on the final image. '
+              'Use Fix It on the next screen to manually restore it, or '
+              'retry with a photo that has more contrast against its background.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Got it')),
+            ],
+          ),
+        );
+        if (!mounted) return;
+      }
+
       // Use push, not pushReplacement — the onConfirmed closure below reuses
       // this screen's `context` later (when the user taps Looks Good, which
       // can be much later, after Fix It too). pushReplacement would remove
