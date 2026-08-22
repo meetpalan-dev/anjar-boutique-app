@@ -5,6 +5,79 @@ import 'package:image/image.dart' as img;
 import 'templates.dart';
 import 'main.dart' show DetailsFormScreen;
 
+/// Runs entirely on a background isolate via [compute] — resize, composite,
+/// and PNG encoding are pixel-by-pixel Dart loops that can take a couple of
+/// seconds on a full-size photo. Doing that synchronously on the main
+/// isolate (as this used to) blocks the UI thread for that whole time: the
+/// loading spinner never gets a chance to paint, gestures stop responding,
+/// and past ~5s Android reports the app as ANR ("isn't responding") — which
+/// is exactly what tapping Continue looked like from the outside.
+Uint8List _composeFinalImageIsolate(_ComposeParams p) {
+  final tpl = img.Image.fromBytes(
+    width: p.tplWidth,
+    height: p.tplHeight,
+    bytes: p.tplBytes.buffer,
+    numChannels: 4,
+    order: img.ChannelOrder.rgba,
+  );
+  final cutout = img.Image.fromBytes(
+    width: p.cutoutWidth,
+    height: p.cutoutHeight,
+    bytes: p.cutoutBytes.buffer,
+    numChannels: 4,
+    order: img.ChannelOrder.rgba,
+  );
+
+  final scaledW = (p.cutoutWidth * p.scale).round().clamp(1, 20000);
+  final scaledH = (p.cutoutHeight * p.scale).round().clamp(1, 20000);
+  final resizedCutout = img.copyResize(
+    cutout,
+    width: scaledW,
+    height: scaledH,
+    // average is a box filter meant for shrinking; linear is the cheap,
+    // correct choice for enlarging. (cubic is ~an order of magnitude
+    // slower per pixel and isn't needed here.)
+    interpolation: p.scale < 1.0 ? img.Interpolation.average : img.Interpolation.linear,
+  );
+
+  final pasteX = (p.centerX - scaledW / 2).round();
+  final pasteY = (p.centerY - scaledH / 2).round();
+  img.compositeImage(
+    tpl,
+    resizedCutout,
+    dstX: pasteX,
+    dstY: pasteY,
+    dstW: resizedCutout.width,
+    dstH: resizedCutout.height,
+  );
+
+  return Uint8List.fromList(img.encodePng(tpl));
+}
+
+class _ComposeParams {
+  final Uint8List tplBytes;
+  final int tplWidth;
+  final int tplHeight;
+  final Uint8List cutoutBytes;
+  final int cutoutWidth;
+  final int cutoutHeight;
+  final double centerX;
+  final double centerY;
+  final double scale;
+
+  const _ComposeParams({
+    required this.tplBytes,
+    required this.tplWidth,
+    required this.tplHeight,
+    required this.cutoutBytes,
+    required this.cutoutWidth,
+    required this.cutoutHeight,
+    required this.centerX,
+    required this.centerY,
+    required this.scale,
+  });
+}
+
 class PositioningScreen extends StatefulWidget {
   final img.Image cutout;
   const PositioningScreen({super.key, required this.cutout});
@@ -98,35 +171,24 @@ class _PositioningScreenState extends State<PositioningScreen> {
     setState(() => _loading = true);
     try {
       final tpl = await _decodeTemplate(_selectedTemplate.assetPath);
-      final canvas = img.Image.from(tpl);
 
-      final scaledW = (widget.cutout.width * _cutoutScale).round().clamp(1, 20000);
-      final scaledH = (widget.cutout.height * _cutoutScale).round().clamp(1, 20000);
-      final resizedCutout = img.copyResize(
-        widget.cutout,
-        width: scaledW,
-        height: scaledH,
-        // average is a box filter meant for shrinking; use it only when
-        // actually downscaling, otherwise cubic gives correct upscaling.
-        interpolation: _cutoutScale < 1.0 ? img.Interpolation.average : img.Interpolation.cubic,
+      // Snapshot everything the isolate needs as plain, transferable data
+      // (Uint8List + primitives) — img.Image itself can't cross the isolate
+      // boundary, and none of this reads BuildContext/widget state, so it's
+      // safe to hand off to compute() and let the UI thread stay free.
+      final params = _ComposeParams(
+        tplBytes: tpl.getBytes(order: img.ChannelOrder.rgba),
+        tplWidth: tpl.width,
+        tplHeight: tpl.height,
+        cutoutBytes: widget.cutout.getBytes(order: img.ChannelOrder.rgba),
+        cutoutWidth: widget.cutout.width,
+        cutoutHeight: widget.cutout.height,
+        centerX: _cutoutCenter.dx,
+        centerY: _cutoutCenter.dy,
+        scale: _cutoutScale,
       );
 
-      final pasteX = (_cutoutCenter.dx - scaledW / 2).round();
-      final pasteY = (_cutoutCenter.dy - scaledH / 2).round();
-      // Pass dstW/dstH explicitly — compositeImage's own defaults silently
-      // clamp to min(dst, src) dimensions, which is the wrong behavior when
-      // a cutout partially overhangs the canvas edge and should instead be
-      // clipped by position, not resampled down to fit.
-      img.compositeImage(
-        canvas,
-        resizedCutout,
-        dstX: pasteX,
-        dstY: pasteY,
-        dstW: resizedCutout.width,
-        dstH: resizedCutout.height,
-      );
-
-      final composited = Uint8List.fromList(img.encodePng(canvas));
+      final composited = await compute(_composeFinalImageIsolate, params);
       if (!mounted) return;
       Navigator.push(
         context,
