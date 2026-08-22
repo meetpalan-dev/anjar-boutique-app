@@ -17,6 +17,12 @@ jobs:
           channel: 'stable'
       - name: Scaffold Android platform files
         run: flutter create . --platforms=android --org com.anjarboutique --project-name anjar_boutique_bot
+      - name: Set user-facing app name
+        run: |
+          sed -i -E 's/android:label="[^"]*"/android:label="Anjar Boutique Catalogue"/' android/app/src/main/AndroidManifest.xml
+          if [ -f android/app/src/main/res/values/strings.xml ]; then
+            sed -i -E 's/(name="app_name">)[^<]*(<)/\1Anjar Boutique Catalogue\2/' android/app/src/main/res/values/strings.xml
+          fi
       - name: Bump Android compileSdk
         run: |
           sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
